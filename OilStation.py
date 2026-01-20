@@ -194,7 +194,7 @@ def main():
     # --- HEADER E KPI ---
     c_title, c_kpi = st.columns([3, 1])
     with c_title:
-        st.title("🛢️ OIL SENTIMENT: INSTITUTIONAL FEED")
+        st.title("OIL SENTIMENT: INSTITUTIONAL FEED")
         st.caption("AI-READY ANALYTICS ENGINE | REAL-TIME RSS PARSING")
     
     if os.path.exists(DB_FILE):
@@ -244,7 +244,7 @@ def main():
                 """, unsafe_allow_html=True)
 
                 # --- 3. HEATMAP E GRÁFICO (ABAS) ---
-                tab1, tab2 = st.tabs(["📡 HEATMAP (TREEMAP)", "📈 CURVA DE ALPHA"])
+                tab1, tab2 = st.tabs(["📡 HEATMAP (TREEMAP)", "CURVA DE ALPHA"])
                 
                 with tab1:
                     # HEATMAP HIERÁRQUICO
@@ -296,7 +296,7 @@ def main():
                     st.plotly_chart(fig_area, use_container_width=True)
 
                 # --- 4. LEDGER (LOG) ---
-                with st.expander("📋 Ledger de Dados Brutos", expanded=False):
+                with st.expander("Dados Brutos", expanded=False):
                     st.dataframe(
                         active_df[['Data_Hora', 'Fonte', 'Categoria', 'Manchete', 'Alpha', 'Alpha_Decayed']]
                         .sort_values(by="Data_Hora", ascending=False), 
@@ -318,3 +318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
