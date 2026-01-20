@@ -1,6 +1,6 @@
+feedparser
 pandas
 openpyxl
-feedparser
 streamlit
 streamlit-autorefresh
 plotly
