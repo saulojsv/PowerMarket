@@ -92,7 +92,7 @@ def main():
         cad_delta = ((cad_now / cad_open) - 1) * 100
     except: oil_now, cad_delta = 0.0, 0.0
 
-    st.title("QUANT STATION V54 | PRO SIMULATOR")
+    st.title("TERMINAL XTIUSD")
 
     tab_monitor, tab_sim, tab_lexicons = st.tabs(["LIVE MONITOR", "SIMULATION LOG", "WORD LOG"])
 
@@ -125,4 +125,5 @@ def main():
         st.table(lex_df)
 
 if __name__ == "__main__": main()
+
 
