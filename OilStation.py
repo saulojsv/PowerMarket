@@ -1,11 +1,9 @@
 import pandas as pd
 import re
 import feedparser
-import time
 import os
 import streamlit as st
 import plotly.graph_objects as go
-import numpy as np
 import yfinance as yf
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
@@ -16,29 +14,29 @@ st_autorefresh(interval=60000, key="v54_refresh_pro")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #050A12; color: #E0E0E0; }
-    .status-bar {
-        padding: 15px; border-radius: 10px; border-left: 5px solid #00FFC8;
-        background: #0D1421; margin-bottom: 25px; font-family: 'Courier New', monospace;
+    .stApp { background-color: #050A12; color: #FFFFFF; }
+    header {visibility: hidden;}
+    .main .block-container {padding-top: 1.5rem;}
+    
+    /* Metrics High Contrast */
+    [data-testid="stMetricValue"] { font-size: 28px !important; color: #00FFC8 !important; font-weight: 700 !important; }
+    [data-testid="stMetricLabel"] { font-size: 12px !important; color: #94A3B8 !important; text-transform: uppercase; }
+    
+    /* Cards de Tendência */
+    .trend-card {
+        padding: 15px; border-radius: 10px; background: #0D1421; 
+        border: 1px solid #1E293B; text-align: center;
     }
-    .trade-signal {
-        padding: 20px; border-radius: 15px; text-align: center;
-        font-weight: bold; font-size: 24px; border: 1px solid #1B263B;
-    }
-    [data-testid="stMetricValue"] { font-size: 26px !important; color: #00FFC8 !important; }
-    div[data-testid="metric-container"] {
-        background-color: #0D1421; border: 1px solid #1B263B;
-        padding: 15px; border-radius: 12px; box-shadow: 0px 4px 15px rgba(0,0,0,0.5);
-    }
+    .trend-label { color: #94A3B8; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .trend-value { font-size: 18px; font-weight: 700; margin-top: 4px; }
     </style>
 """, unsafe_allow_html=True)
 
 # --- PARÂMETROS ---
 DB_FILE = "Oil_Station_V54_Master.csv"
-TRADE_LOG_FILE = "Trade_Simulation_V54.csv"
-SUSPECT_ASSETS = ["CL=F", "BZ=F", "DX-Y.NYB", "USDCAD=X", "^VIX", "^TNX", "AUDJPY=X", "XLE"]
+SUSPECT_ASSETS = ["CL=F", "DX-Y.NYB", "^VIX", "^TNX"]
 
-# --- 2. BASE DE CONHECIMENTO (20 FONTES E 22 LEXICONS CRÍTICOS EM INGLÊS) ---
+# --- 2. BASE DE CONHECIMENTO COMPLETA (20 FONTES E 22 LEXICONS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -99,9 +97,15 @@ def run_global_scrap():
                 for patt, (w, d, c) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         score = w * d; cat = c; break
-                news_data.append({"Data": datetime.now().strftime("%H:%M"), "Fonte": name, "Manchete": entry.title[:85], "Alpha": score, "Cat": cat})
+                news_data.append({
+                    "Data": datetime.now().strftime("%H:%M"), 
+                    "Fonte": name, 
+                    "Manchete": entry.title[:85], 
+                    "Alpha": score, 
+                    "Cat": cat,
+                    "Link": entry.link
+                })
         except: continue
-    
     if news_data:
         df_new = pd.DataFrame(news_data)
         if os.path.exists(DB_FILE):
@@ -110,81 +114,83 @@ def run_global_scrap():
         df_new.to_csv(DB_FILE, index=False)
 
 @st.cache_data(ttl=300)
-def get_market_intel():
+def get_market_analysis():
     try:
-        data = yf.download(SUSPECT_ASSETS, period="7d", interval="1h", progress=False)['Close']
-        if data.empty: return None
-        data = data.ffill().bfill()
-        prices = data.iloc[-1]
-        deltas = ((data.iloc[-1] / data.iloc[0]) - 1) * 100
-        return prices, deltas, data.corr().fillna(0)
+        data_h1 = yf.download("CL=F", period="10d", interval="1h", progress=False)['Close'].ffill()
+        data_d1 = yf.download("CL=F", period="60d", interval="1d", progress=False)['Close'].ffill()
+        
+        day_trend = "BULLISH" if data_h1.iloc[-1] > data_h1.rolling(20).mean().iloc[-1] else "BEARISH"
+        swing_trend = "BULLISH" if data_d1.iloc[-1] > data_d1.rolling(50).mean().iloc[-1] else "BEARISH"
+        
+        return {
+            "price": data_h1.iloc[-1],
+            "delta": ((data_h1.iloc[-1] / data_h1.iloc[0]) - 1) * 100,
+            "day_trend": day_trend, "swing_trend": swing_trend,
+            "vix": yf.download("^VIX", period="1d", progress=False)['Close'].iloc[-1]
+        }
     except: return None
-
-# --- AVALIAÇÃO DE SENSAÇÃO (LÓGICA DE TOMADA DE DECISÃO) ---
-def get_bias_evaluation(alpha, delta_wti):
-    score = (alpha * 0.5) + (delta_wti * 10) # Peso combinado IA + Preço
-    if score > 5: return "STRONG BUY BIAS", "#00FFC8", "Market feeling bullish on supply fear/demand growth."
-    if score < -5: return "STRONG SELL BIAS", "#FF4B4B", "Market feeling bearish on macro headwinds/excess supply."
-    return "NEUTRAL / WAIT", "#E0E0E0", "No clear directional sensation. Scalp with caution."
 
 # --- 4. INTERFACE ---
 def main():
     run_global_scrap()
-    market = get_market_intel()
-    if market is None: return
+    analysis = get_market_analysis()
+    if not analysis: return
         
-    prices, deltas, corr_matrix = market
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0
-    bias, b_color, b_desc = get_bias_evaluation(avg_alpha, deltas.get('CL=F', 0))
     
-    # Barra de Status
-    st.markdown(f'<div class="status-bar">TERMINAL XTIUSD | CRITICAL MODE | ALPHA: {avg_alpha:.2f}</div>', unsafe_allow_html=True)
+    # Header e Tendências
+    col_met, col_trend = st.columns([2, 1])
+    with col_met:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("WTI CRUDE", f"$ {analysis['price']:.2f}", f"{analysis['delta']:.2f}%")
+        c2.metric("IA ALPHA", f"{avg_alpha:.2f}")
+        c3.metric("BANCA", "300.00 €")
 
-    # Métricas
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("WTI", f"$ {prices.get('CL=F', 0):.2f}", f"{deltas.get('CL=F', 0):.2f}%")
-    m2.metric("VIX", f"{prices.get('^VIX', 0):.2f}", f"{deltas.get('^VIX', 0):.2f}%")
-    m3.metric("ALPHA IA", f"{avg_alpha:.2f}")
-    
-    lucro = 0
-    if os.path.exists(TRADE_LOG_FILE):
-        try: lucro = pd.read_csv(TRADE_LOG_FILE)['PnL'].sum()
-        except: pass
-    m4.metric("BANCA", f"{300 + lucro:.2f} €")
+    with col_trend:
+        dt_c = "#00FFC8" if analysis['day_trend'] == "BULLISH" else "#FF4B4B"
+        st_c = "#00FFC8" if analysis['swing_trend'] == "BULLISH" else "#FF4B4B"
+        st.markdown(f"""
+            <div style="display: flex; gap: 10px;">
+                <div class="trend-card" style="flex: 1; border-bottom: 3px solid {dt_c};">
+                    <div class="trend-label">Daytrade (H1)</div>
+                    <div class="trend-value" style="color: {dt_c};">{analysis['day_trend']}</div>
+                </div>
+                <div class="trend-card" style="flex: 1; border-bottom: 3px solid {st_c};">
+                    <div class="trend-label">Swing (D1)</div>
+                    <div class="trend-value" style="color: {st_c};">{analysis['swing_trend']}</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
     st.markdown("---")
     
-    # Bloco de Avaliação de Sensação
-    col_sig, col_gauge = st.columns([1, 1])
-    with col_sig:
-        st.write("### Decision Sensitivity")
-        st.markdown(f"""
-            <div class="trade-signal" style="color: {b_color}; border-color: {b_color}; background: rgba(0,0,0,0.2)">
-                {bias}<br><small style="font-size: 14px; color: #888;">{b_desc}</small>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col_gauge:
-        fig_gauge = go.Figure(go.Indicator(
+    # Velocímetro e Tabela
+    col_v, col_n = st.columns([1, 1.8])
+    with col_v:
+        fig_v = go.Figure(go.Indicator(
             mode = "gauge+number", value = avg_alpha,
-            gauge = {'axis': {'range': [-10, 10]}, 'bar': {'color': b_color}, 
-                     'steps': [{'range': [-10, -5], 'color': 'rgba(255, 75, 75, 0.2)'}, {'range': [5, 10], 'color': 'rgba(0, 255, 200, 0.2)'}]},
-            title = {'text': "IA Sensation Score"}
+            gauge = {
+                'axis': {'range': [-10, 10], 'tickcolor': "#94A3B8"},
+                'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"},
+                'bgcolor': "#0D1421",
+                'steps': [{'range': [-10, -5], 'color': 'rgba(255, 75, 75, 0.1)'}, {'range': [5, 10], 'color': 'rgba(0, 255, 200, 0.1)'}]}
         ))
-        fig_gauge.update_layout(paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, height=250, margin=dict(t=30, b=0))
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        fig_v.update_layout(height=260, margin=dict(t=0, b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+        st.plotly_chart(fig_v, use_container_width=True)
+    
+    with col_n:
+        st.markdown("### Terminal - XTIUSD")
+        if not df_news.empty:
+            # Lógica de Cor + Hiperlink
+            def make_clickable(link):
+                return f'<a href="{link}" target="_blank" style="color: #00FFC8; text-decoration: none; font-weight: bold;">OPEN LINK</a>'
 
-    # TABELA TERMINAL - XTIUSD
-    st.markdown("### Terminal - XTIUSD")
-    if not df_news.empty:
-        # Estilização: Verde para Alpha+, Vermelho para Alpha-, Cinza para Neutro
-        def style_rows(row):
-            if row['Alpha'] > 0: return ['color: #00FFC8'] * len(row)
-            if row['Alpha'] < 0: return ['color: #FF4B4B'] * len(row)
-            return ['color: #888888'] * len(row)
+            df_display = df_news.head(15).copy()
+            df_display['Link'] = df_display['Link'].apply(make_clickable)
 
-        st.dataframe(df_news.head(30).style.apply(style_rows, axis=1), use_container_width=True, hide_index=True)
+            # Estilização da Tabela
+            st.write(df_display.to_html(escape=False, index=False), unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
