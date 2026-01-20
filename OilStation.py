@@ -109,7 +109,7 @@ def main():
         st.header("TERMINAIS ONLINE")
         for s in RSS_SOURCES.keys(): st.markdown(f"• {s}: <span class='status-on'>ATIVO</span>", unsafe_allow_html=True)
         st.divider()
-        st.markdown("### TERMOS APRENDIDOS PÓS-REVISÃO")
+        st.markdown("TERMOS APRENDIDOS PÓS-REVISÃO")
         if os.path.exists(DB_FILE):
             df_sidebar = pd.read_csv(DB_FILE)
             novos = df_sidebar[df_sidebar['Tipo'] == 'Novo']['Manchete'].unique()
@@ -145,4 +145,5 @@ def main():
         st.info("Conectando terminais... Aguarde 60 segundos.")
 
 if __name__ == "__main__": main()
+
 
