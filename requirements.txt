@@ -1,9 +1,7 @@
-feedparser
 pandas
-openpyxl
 streamlit
-streamlit-autorefresh
-plotly
-
-numpy
 yfinance
+feedparser
+plotly
+streamlit-autorefresh
+matplotlib
