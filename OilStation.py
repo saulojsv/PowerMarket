@@ -9,11 +9,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh # Necessário para atualização automática
 
-# --- CONFIGURAÇÃO DE ARQUIVO ---
-DB_FILE = "Oil_Station_V25_Final.csv"
+# --- DATABASE ---
+DB_FILE = "Oil_Station_V26.csv"
 
-# --- TERMINAIS RSS ---
+# Atualização automática a cada 60.000ms (1 minuto)
+st_autorefresh(interval=60000, key="datarefresh")
+
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -23,7 +26,7 @@ RSS_SOURCES = {
     "gCaptain": "https://gcaptain.com/feed/"
 }
 
-# --- 22 DADOS LEXICON ORIGINAIS ---
+# 22 DADOS LEXICON ORIGINAIS
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
@@ -49,19 +52,26 @@ LEXICON_TOPICS = {
     r"contango|discount|storage play": [7.5, -1, "Estrutura (Bearish)"]
 }
 
-# --- FUNÇÕES DE MOTOR ---
-def discover_new_terms(title):
-    words = re.findall(r'\b[a-zA-Z]{6,}\b', title.lower())
-    lex_str = "|".join(LEXICON_TOPICS.keys()).lower()
-    ignore = ['market', 'prices', 'energy', 'report', 'stocks', 'global', 'crude', 'oilprice']
-    return [w for w in words if w not in lex_str and w not in ignore]
+# DICIONÁRIO DE RIGOR (Para novos termos)
+POLARITY_SIGNALS = {
+    "bullish": ["surge", "jump", "spike", "tighten", "deficit", "up", "climb"],
+    "bearish": ["plunge", "drop", "slump", "glut", "surplus", "down", "fall"]
+}
+
+def analyze_new_term_bias(title):
+    t_lower = title.lower()
+    for word in POLARITY_SIGNALS["bullish"]:
+        if word in t_lower: return 1.0 # Positivo
+    for word in POLARITY_SIGNALS["bearish"]:
+        if word in t_lower: return -1.0 # Negativo
+    return 0.0
 
 def news_monitor():
     while True:
         for source, url in RSS_SOURCES.items():
             try:
                 feed = feedparser.parse(url)
-                for entry in feed.entries[:15]:
+                for entry in feed.entries[:10]:
                     t_lower = entry.title.lower()
                     found = False
                     for pattern, params in LEXICON_TOPICS.items():
@@ -69,93 +79,69 @@ def news_monitor():
                             alpha = params[0] * params[1]
                             prob = 1 / (1 + np.exp(-0.5 * alpha))
                             sent = f"{prob*100:.1f}% COMPRA" if prob > 0.5 else f"{(1-prob)*100:.1f}% VENDA"
-                            data = {"Hora": datetime.now().strftime("%H:%M:%S"), "Fonte": source, "Manchete": entry.title, "Cat": params[2], "Termo": re.search(pattern, t_lower).group(), "Sent": sent, "Alpha": alpha, "TS": datetime.now().isoformat(), "Tipo": "Consolidado"}
+                            data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Cat": params[2], "Sent": sent, "Alpha": alpha, "TS": datetime.now().isoformat(), "Tipo": "Lexicon"}
                             pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
                             found = True
                     if not found:
-                        new_words = discover_new_terms(entry.title)
-                        for nw in new_words:
-                            data = {"Hora": datetime.now().strftime("%H:%M:%S"), "Fonte": source, "Manchete": entry.title, "Cat": "Aprendizado", "Termo": nw, "Sent": "Pendente", "Alpha": 0, "TS": datetime.now().isoformat(), "Tipo": "Descoberta"}
-                            pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
+                        words = re.findall(r'\b[a-zA-Z]{6,}\b', t_lower)
+                        for nw in words:
+                            bias = analyze_new_term_bias(t_lower)
+                            if bias != 0: # SÓ APRENDE SE HOUVER SINAL DE DIREÇÃO (RIGOR)
+                                data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Cat": "Aprendizado", "Sent": "Calculando...", "Alpha": 2.0 * bias, "TS": datetime.now().isoformat(), "Tipo": "Novo"}
+                                pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
-# --- INTERFACE ---
 def main():
-    st.set_page_config(page_title="OIL STATION", layout="wide")
-    
+    st.set_page_config(page_title="ANÁLISE DE NOTÍCIAS E TERMOS LÉXICOS", layout="wide")
     st.markdown("""<style>
-        .stApp, [data-testid="stSidebar"], .stSidebar { background-color: #0A192F !important; }
+        .stApp, [data-testid="stSidebar"] { background-color: #0A192F !important; }
         * { color: #FFFFFF !important; }
-        div[data-testid="stDataFrame"] div { background-color: #112240 !important; }
-        div[data-testid="stDataFrame"] td { color: #FFFFFF !important; font-weight: bold !important; border-bottom: 1px solid #1B2B48 !important; }
+        div[data-testid="stDataFrame"] td { font-weight: bold !important; border-bottom: 1px solid #1B2B48 !important; font-size: 14px !important;}
         .status-on { color: #39FF14 !important; font-weight: bold; }
-        .new-term { color: #64FFDA !important; font-size: 14px; font-weight: bold; }
     </style>""", unsafe_allow_html=True)
 
     if 'monitor' not in st.session_state:
         threading.Thread(target=news_monitor, daemon=True).start()
         st.session_state['monitor'] = True
 
-    # SIDEBAR: STATUS E APRENDIZADO
     with st.sidebar:
-        st.header("📡 SITES ONLINE")
-        for s in RSS_SOURCES.keys(): st.markdown(f"• {s}: <span class='status-on'>ONLINE</span>", unsafe_allow_html=True)
+        st.header("📡 TERMINAIS ONLINE")
+        for s in RSS_SOURCES.keys(): st.markdown(f"• {s}: <span class='status-on'>ATIVO</span>", unsafe_allow_html=True)
         st.divider()
-        st.markdown("###  NOVOS TERMOS (CRIVO)")
+        st.markdown("### 🧠 TERMOS APRENDIDOS (RIGOROSOS)")
         if os.path.exists(DB_FILE):
-            raw_df = pd.read_csv(DB_FILE)
-            discoveries = raw_df[raw_df['Tipo'] == 'Descoberta']
-            counts = discoveries['Termo'].value_counts()
-            sources = discoveries.groupby('Termo')['Fonte'].nunique()
-            learned = 0
-            for t, c in counts.items():
-                if c > 3 or sources[t] > 1: # Crivo: >3 vezes ou >1 fonte
-                    st.markdown(f"<span class='new-term'>⚡ {t.upper()}</span>", unsafe_allow_html=True)
-                    learned += 1
-            if learned == 0: st.caption("Buscando padrões relevantes...")
-        st.divider()
-        st.caption("Fundo: Navy | Texto: Branco Pure")
+            df_sidebar = pd.read_csv(DB_FILE)
+            novos = df_sidebar[df_sidebar['Tipo'] == 'Novo']['Manchete'].unique()
+            for n in novos[:5]: st.caption(f"⚡ {n[:30]}...")
 
-    # ÁREA PRINCIPAL
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('TS', ascending=False)
-        consolidated = df[df['Tipo'] == 'Consolidado']
         
-        # 1. VELOCÍMETRO GLOBAL
-        net_alpha = consolidated['Alpha'].sum()
+        # VELOCÍMETRO
+        net_alpha = df['Alpha'].sum()
         prob_global = 100 / (1 + np.exp(-0.08 * net_alpha))
         
         c1, c2 = st.columns([2, 1])
         with c1:
-            st.title("OIL STATION")
-            st.write(f"Análise Singular de Manchetes | {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+            st.title(TERMINAL - XTIUSD")
+            st.write(f"Sincronizado: {datetime.now().strftime('%H:%M:%S')} (Auto-refresh 60s)")
         with c2:
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=prob_global, 
-                number={'suffix': "%", 'font': {'color': "#FFFFFF"}},
-                gauge={'axis': {'range': [0, 100], 'tickcolor': "white"}, 'bar': {'color': "#64FFDA"}}))
-            fig.update_layout(height=180, margin=dict(t=0, b=0), paper_bgcolor='rgba(0,0,0,0)')
+            fig = go.Figure(go.Indicator(mode="gauge+number", value=prob_global, number={'suffix': "%"}, gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#64FFDA"}}))
+            fig.update_layout(height=160, margin=dict(t=0, b=0), paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
 
-        # 2. ABAS DE VISUALIZAÇÃO
-        tab_fluxo, tab_heat = st.tabs([" FLUXO SINGULAR", " MAPA CATEGORIAL"])
+        tab_fluxo, tab_mapa = st.tabs(["FLUXO DE NOTÍCIAS", "HEATMAP POR CATEGORIA"])
         
         with tab_fluxo:
-            # Tabela com as informações cruciais para a foto
-            st.dataframe(consolidated[['Hora', 'Fonte', 'Manchete', 'Sent', 'Cat']].head(40), use_container_width=True)
+            # TABELA CORRIGIDA: Agora exibe todas as colunas essenciais para sua leitura singular
+            st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Sent', 'Cat']].head(50), use_container_width=True)
 
-        with tab_heat:
-            st.subheader("Market Share de Narrativas (%)")
-            cat_df = consolidated['Cat'].value_counts(normalize=True).reset_index()
-            cat_df.columns = ['Categoria', 'Share']
-            cat_df['%'] = (cat_df['Share'] * 100).round(1).astype(str) + '%'
-            
-            fig_tree = px.treemap(cat_df, path=['Categoria'], values='Share', 
-                                 color_discrete_sequence=['#112240', '#64FFDA', '#1B2B48'])
-            fig_tree.update_traces(texttemplate="<b>%{label}</b><br>%{customdata[0]}", customdata=cat_df[['%']])
-            fig_tree.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+        with tab_mapa:
+            cat_df = df['Cat'].value_counts(normalize=True).reset_index()
+            fig_tree = px.treemap(cat_df, path=['Cat'], values='proportion', color_discrete_sequence=['#112240', '#64FFDA'])
             st.plotly_chart(fig_tree, use_container_width=True)
     else:
-        st.info("Inicializando conexão com os terminais RSS...")
+        st.info("Conectando terminais... Aguarde 60 segundos.")
 
 if __name__ == "__main__": main()
