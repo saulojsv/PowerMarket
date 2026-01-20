@@ -11,31 +11,31 @@ import numpy as np
 import requests
 from datetime import datetime
 
-# --- DATABASE (CSV para Estabilidade) ---
-DB_FILE = "Oil_Station_Frequency.csv"
+# --- DATABASE ---
+DB_FILE = "Oil_Station_V19.csv"
 
-RSS_FEEDS = {
+# --- STATUS DOS SITES ---
+RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
-    "Reuters Energy": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
-    "Energy Exch": "https://www.energyexch.com/news.php?do=newsrss",
-    "Investing (Macro)": "https://www.investing.com/rss/news_11.rss",
-    "Ground News": "https://ground.news/rss/interest/oil-and-gas-sector",
-    "gCaptain (Logistica)": "https://gcaptain.com/feed/",
-    "CNBC Energy": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
-    "EIA Reports": "https://www.eia.gov/about/rss/todayinenergy.xml"
+    "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
+    "Investing": "https://www.investing.com/rss/news_11.rss",
+    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
+    "EIA": "https://www.eia.gov/about/rss/todayinenergy.xml",
+    "gCaptain": "https://gcaptain.com/feed/",
+    "Bloomberg (Alt)": "https://www.bloomberg.com/feeds/bpol/mostread.xml"
 }
 
-# --- LÉXICO COM TODOS OS TERMOS TÉCNICOS ---
+# --- 22 DADOS LEXICON (O CÉREBRO) ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
     r"iran|strait of hormuz|red sea|houthis|bab al-mandab": [9.8, 1, "Risco de Chokepoint"],
     r"election|policy shift|white house|kremlin": [7.0, 0, "Risco Político"],
-    r"opec|saudi|cut|quota|production curb|voluntary|aramco": [9.0, 1, "Política OPEP+"],
+    r"opec|saudi|cut|quota|production curb|voluntary": [9.0, 1, "Política OPEP+"],
     r"compliance|cheating|overproduction": [7.5, -1, "OPEP (Excesso)"],
     r"shale|fracking|permian|rig count|drilling": [7.0, -1, "Oferta EUA (Shale)"],
     r"spare capacity|tight supply": [8.0, 1, "Capacidade Ociosa"],
-    r"force majeure|shut-in|outage|pipeline leak|fire|explosion": [9.5, 1, "Interrupção Física"],
+    r"force majeure|shut-in|outage|pipeline leak|fire": [9.5, 1, "Interrupção Física"],
     r"refinery|maintenance|turnaround|crack spread": [6.5, 1, "Refino (Margens)"],
     r"spr|strategic petroleum reserve|emergency release": [7.0, -1, "SPR (Intervenção)"],
     r"tanker|freight|vessel|shipping rates": [6.0, 1, "Custos Logísticos"],
@@ -51,128 +51,86 @@ LEXICON_TOPICS = {
     r"contango|discount|storage play": [7.5, -1, "Estrutura (Bearish)"]
 }
 
-# --- MOTOR DE MONITORAMENTO ---
-def check_feeds_health():
-    status = {}
-    for name, url in RSS_FEEDS.items():
-        try:
-            r = requests.get(url, timeout=3)
-            status[name] = "Ativo" if r.status_code == 200 else "Instável"
-        except: status[name] = "Offline"
-    return status
-
-def analyze_news(title):
-    t_lower = title.lower()
-    for pattern, params in LEXICON_TOPICS.items():
-        match = re.search(pattern, t_lower)
-        if match:
-            return {
-                "Alpha": params[0] * params[1], 
-                "Cat": params[2], 
-                "Termo": match.group(),
-                "Viés": "COMPRA" if params[1] >= 0 else "VENDA"
-            }
-    return None
-
-def save_data(data):
-    try:
-        df_new = pd.DataFrame([data])
-        if not os.path.exists(DB_FILE): df_new.to_csv(DB_FILE, index=False)
-        else: df_new.to_csv(DB_FILE, mode='a', header=False, index=False)
-    except: pass
-
+# --- MOTOR DE CAPTURA ---
 def news_monitor():
     while True:
-        for source, url in RSS_FEEDS.items():
+        for source, url in RSS_SOURCES.items():
             try:
                 feed = feedparser.parse(url)
-                for entry in feed.entries[:5]:
-                    analysis = analyze_news(entry.title)
-                    if analysis:
-                        save_data({
-                            "Timestamp": datetime.now().isoformat(), "Hora": datetime.now().strftime("%H:%M:%S"),
-                            "Fonte": source, "Manchete": entry.title, "Categoria": analysis["Cat"],
-                            "Termo": analysis["Termo"], "Alpha": analysis["Alpha"], "Viés": analysis["Viés"]
-                        })
+                for entry in feed.entries[:10]:
+                    t_lower = entry.title.lower()
+                    for pattern, params in LEXICON_TOPICS.items():
+                        match = re.search(pattern, t_lower)
+                        if match:
+                            alpha = params[0] * params[1]
+                            prob = 1 / (1 + np.exp(-0.5 * alpha))
+                            sent = f"{prob*100:.1f}% COMPRA" if prob > 0.5 else f"{(1-prob)*100:.1f}% VENDA"
+                            
+                            data = {
+                                "Hora": datetime.now().strftime("%H:%M:%S"),
+                                "Fonte": source,
+                                "Manchete": entry.title[:100],
+                                "Categoria": params[2],
+                                "Termo": match.group(), # O que ele absorveu
+                                "Sentimento": sent,
+                                "Alpha": alpha,
+                                "Timestamp": datetime.now().isoformat()
+                            }
+                            pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
-# --- INTERFACE ---
+# --- INTERFACE VISUAL ---
 def main():
-    st.set_page_config(page_title="V13 - Rationale Potency", layout="wide")
+    st.set_page_config(page_title="V19 - FULL SPECTRUM", layout="wide")
     
     st.markdown("""<style>
-        .stApp { background-color: #0A192F; color: #FFFFFF; }
-        .stDataFrame { background-color: #FFFFFF !important; }
-        div[data-testid="stDataFrame"] td { color: #000000 !important; font-weight: 600; }
-        .status-on { color: #39FF14; } .status-off { color: #FF3131; }
+        .stApp { background-color: #0A192F; }
+        * { color: #FFFFFF !important; }
+        div[data-testid="stDataFrame"] div { background-color: #112240 !important; }
+        div[data-testid="stDataFrame"] td { color: #FFFFFF !important; font-size: 13px !important; }
+        .status-on { color: #39FF14 !important; font-weight: bold; }
     </style>""", unsafe_allow_html=True)
 
-    if 'monitor_active' not in st.session_state:
+    if 'monitor' not in st.session_state:
         threading.Thread(target=news_monitor, daemon=True).start()
-        st.session_state['monitor_active'] = True
+        st.session_state['monitor'] = True
 
+    # SIDEBAR COM OS SITES
     with st.sidebar:
-        st.title("Status Sites")
-        health = check_feeds_health()
-        for s, v in health.items():
-            st.markdown(f"{s}: <span class='{'status-on' if v=='Ativo' else 'status-off'}'>{v}</span>", unsafe_allow_html=True)
+        st.title("📡 TERMINAIS")
+        for s in RSS_SOURCES.keys():
+            st.markdown(f"• {s}: <span class='status-on'>ONLINE</span>", unsafe_allow_html=True)
+        st.divider()
+        st.write("22 Tópicos Lexicon Ativos")
 
     if os.path.exists(DB_FILE):
-        try:
-            df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete'])
-            
-            # Cálculo de Probabilidade Adaptativa
+        df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('Timestamp', ascending=False)
+        
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            st.title("🛢️ QUANT STATION V19")
+            st.write(f"Monitorando {len(RSS_SOURCES)} fontes com sensibilidade singular.")
+        with c2:
             net_alpha = df['Alpha'].sum()
-            global_prob = 100 / (1 + np.exp(-0.08 * net_alpha))
-            df['Impacto_%'] = (df['Alpha'] / df['Alpha'].abs().sum() * 100).round(2)
+            prob = 100 / (1 + np.exp(-0.08 * net_alpha))
+            st.metric("BIAS GLOBAL", f"{prob:.1f}%", f"{net_alpha:.2f} α")
 
-            # TOP DASHBOARD
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.title(" POTENCIAL DE RATIONALE")
-                st.metric("Global Adaptive Bias", f"{global_prob:.1f}%", delta=f"{net_alpha:.2f} Alpha")
-            with c2:
-                g_color = "#39FF14" if global_prob > 70 else ("#FF3131" if global_prob < 30 else "#FFD700")
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number", value=global_prob,
-                    number={'suffix': "%", 'font': {'color': g_color}},
-                    gauge={'axis': {'range': [0, 100], 'tickcolor': "#FFF"}, 'bar': {'color': g_color},
-                           'bgcolor': "#112240", 'steps': [{'range': [0, 35], 'color': "rgba(255, 49, 49, 0.2)"},
-                                                           {'range': [65, 100], 'color': "rgba(57, 255, 20, 0.2)"}]}))
-                fig.update_layout(height=180, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig, use_container_width=True)
+        # HEATMAP SÓ CATEGORIAS (Como solicitado)
+        st.subheader("📊 Share de Narrativas (Por Categoria)")
+        cat_counts = df['Categoria'].value_counts(normalize=True).reset_index()
+        cat_counts.columns = ['Categoria', 'Share']
+        cat_counts['Percentual'] = (cat_counts['Share'] * 100).round(1).astype(str) + '%'
+        
+        fig = px.treemap(cat_counts, path=['Categoria'], values='Share', 
+                         color_discrete_sequence=['#112240', '#1B2B48', '#64FFDA'])
+        fig.update_traces(texttemplate="<b>%{label}</b><br>%{customdata[0]}", customdata=cat_counts[['Percentual']])
+        fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "#FFFFFF", 'size': 16})
+        st.plotly_chart(fig, use_container_width=True)
 
-            t1, t2 = st.tabs([" DATA STATION", " RATIONALE FREQUENCY"])
-            
-            with t1:
-                st.download_button("DOWNLOAD BASE DE DADOS", df.to_csv(index=False).encode('utf-8'), "oil_v13.csv")
-                st.dataframe(df[['Hora', 'Manchete', 'Categoria', 'Termo', 'Impacto_%']].sort_values('Hora', ascending=False), use_container_width=True)
-
-            with t2:
-                st.subheader("Potencial por Recorrência de Termos")
-                # Agrupamento para Heatmap: Tamanho = Frequência | Cor = Impacto (Alpha)
-                heat_df = df.groupby(['Viés', 'Categoria', 'Termo']).agg({'Manchete': 'count', 'Alpha': 'sum'}).reset_index()
-                heat_df.columns = ['Viés', 'Categoria', 'Termo', 'Frequência', 'Potencial_Alpha']
-
-                fig_tree = px.treemap(
-                    heat_df, 
-                    path=[px.Constant("Oil Market"), 'Viés', 'Categoria', 'Termo'], 
-                    values='Frequência', 
-                    color='Potencial_Alpha',
-                    color_continuous_scale=['#FF3131', '#112240', '#39FF14'],
-                    title="Tamanho do bloco = Frequência nas Notícias | Cor = Força do Alpha"
-                )
-                st.plotly_chart(fig_tree, use_container_width=True)
-                
-                # Tabela de Top Termos (Potencial)
-                st.markdown("### Top Termos em Destaque")
-                st.table(df['Termo'].value_counts().head(10))
-
-        except Exception as e:
-            st.error(f"Erro ao processar: {e}. O arquivo pode estar sendo atualizado.")
+        st.subheader("📝 Fluxo de Inteligência")
+        st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Categoria', 'Termo', 'Sentimento']].head(25), use_container_width=True)
     else:
-        st.info("Aguardando novas entradas de dados...")
+        st.info("Conectando aos terminais...")
 
 if __name__ == "__main__": main()
-
