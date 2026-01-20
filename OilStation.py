@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v65_refresh")
+st_autorefresh(interval=60000, key="v66_refresh")
 
 st.markdown("""
     <style>
@@ -138,13 +138,22 @@ def fetch_filtered_news():
 @st.cache_data(ttl=60)
 def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
+    default_vals = {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}
     try:
         data = yf.download(list(tickers.values()), period="2d", interval="15m", progress=False)
-        prices = {k: data['Close'][v].iloc[-1] for k, v in tickers.items()}
-        wti_momentum = data['Close']['CL=F'].pct_change().iloc[-1]
+        if data.empty or 'Close' not in data:
+            return default_vals, 0.0
+        
+        closes = data['Close'].ffill()
+        prices = {k: closes[v].iloc[-1] for k, v in tickers.items() if v in closes}
+        
+        # Correção do Future Warning do Pandas para 2026
+        wti_series = closes['CL=F']
+        wti_momentum = wti_series.pct_change(fill_method=None).iloc[-1] if not wti_series.empty else 0.0
+        
         return prices, wti_momentum
-    except:
-        return {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}, 0.0
+    except Exception as e:
+        return default_vals, 0.0
 
 # --- 4. RENDERIZAÇÃO ---
 def main():
@@ -171,10 +180,11 @@ def main():
     """, unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}", f"{momentum:.2%}")
-    c2.metric("SPREAD B/W", f"$ {prices['BRENT'] - prices['WTI']:.2f}")
+    c1.metric("WTI CRUDE", f"$ {prices.get('WTI', 0):.2f}", f"{momentum:.2%}")
+    spread = prices.get('BRENT', 0) - prices.get('WTI', 0)
+    c2.metric("SPREAD B/W", f"$ {spread:.2f}")
     c3.metric("IA ALPHA SCORE", f"{avg_alpha:.2f}")
-    c4.metric("DXY INDEX", f"{prices['DXY']:.2f}")
+    c4.metric("DXY INDEX", f"$ {prices.get('DXY', 0):.2f}")
 
     st.markdown("---")
     
