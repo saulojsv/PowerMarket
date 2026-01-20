@@ -11,11 +11,11 @@ import numpy as np
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E SINCRONISMO (2026) ---
-DB_FILE = "Oil_Station_V37_Master.csv"
-st_autorefresh(interval=60000, key="v37_refresh")
+# --- 1. CONFIGURAÇÕES E SINCRONISMO ---
+DB_FILE = "Oil_Station_V39_Master.csv"
+st_autorefresh(interval=60000, key="v39_refresh")
 
-# --- 2. TERMINAIS RSS (SITES) ---
+# --- 2. TERMINAIS RSS (SEUS 6 SITES) ---
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -25,7 +25,7 @@ RSS_SOURCES = {
     "gCaptain": "https://gcaptain.com/feed/"
 }
 
-# --- 3. OS 22 DADOS LEXICON (CÉREBRO ORIGINAL) ---
+# --- 3. SEUS 22 DADOS LEXICON (O CÉREBRO) ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
@@ -51,27 +51,30 @@ LEXICON_TOPICS = {
     r"contango|discount|storage play": [7.5, -1, "Estrutura (Bearish)"]
 }
 
-# --- 4. MODIFICADORES DE CONTEXTO (PARA CÁLCULO HONESTO) ---
+# --- 4. MOTOR DE HONESTIDADE CONTEXTUAL ---
 CONTEXT_RULES = {
-    "POSITIVE_VIBE": ["surge", "boost", "cut", "tighten", "deficit", "disruption", "war", "sanction"],
-    "NEGATIVE_VIBE": ["plunge", "increase", "glut", "surplus", "slowdown", "recession", "peace", "easing"]
+    "BULLISH_MOD": ["cut", "surge", "attack", "shortage", "sanction", "emergency", "immediate"],
+    "BEARISH_MOD": ["increase", "plunge", "surplus", "recession", "peace", "easing", "glut"]
 }
 
-def analyze_honest_bias(title, base_alpha):
+def calculate_honest_bias(title, base_alpha):
     t_lower = title.lower()
-    context_score = 0
-    # Verifica se o contexto reforça ou inverte o viés
-    for w in CONTEXT_RULES["POSITIVE_VIBE"]:
-        if w in t_lower: context_score += 1.2
-    for w in CONTEXT_RULES["NEGATIVE_VIBE"]:
-        if w in t_lower: context_score -= 1.2
+    score = base_alpha
+    # Ajuste de contexto real
+    for w in CONTEXT_RULES["BULLISH_MOD"]:
+        if w in t_lower: score += 1.5
+    for w in CONTEXT_RULES["BEARISH_MOD"]:
+        if w in t_lower: score -= 1.5
     
-    final_alpha = base_alpha + context_score
-    prob = 1 / (1 + np.exp(-0.32 * abs(final_alpha)))
-    side = "COMPRA" if final_alpha > 0 else "VENDA"
-    return f"{np.clip(prob, 0.51, 0.97)*100:.1f}% {side}", final_alpha
+    # Penalidade por incerteza (honestidade)
+    if any(x in t_lower for x in ["may", "could", "potential", "rumor"]):
+        score = score * 0.6
+        
+    prob = 1 / (1 + np.exp(-0.35 * abs(score)))
+    side = "COMPRA" if score > 0 else "VENDA"
+    return f"{np.clip(prob, 0.51, 0.97)*100:.1f}% {side}", score
 
-# --- 5. MONITORAMENTO INTEGRADO (NOTÍCIAS + APRENDIZADO) ---
+# --- 5. MONITOR DE NOTÍCIAS INTEGRADO ---
 def news_monitor():
     while True:
         for source, url in RSS_SOURCES.items():
@@ -80,34 +83,32 @@ def news_monitor():
                 for entry in feed.entries[:10]:
                     t_lower = entry.title.lower()
                     found = False
-                    # Cruzamento com Lexicon Existente
+                    # Busca nos 22 Lexicons
                     for pat, par in LEXICON_TOPICS.items():
                         if re.search(pat, t_lower):
-                            sent, f_alpha = analyze_honest_bias(entry.title, par[0] * par[1])
-                            data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Cat": par[2], "Sent": sent, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Lexicon", "Termo": re.search(pat, t_lower).group()}
+                            sent, f_alpha = calculate_honest_bias(entry.title, par[0] * par[1])
+                            data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Cat": par[2], "Link": entry.link, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Lexicon"}
                             pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
                             found = True
-                    # Lógica de Aprendizado Contextual (Novos Termos)
-                    if not found:
-                        if any(x in t_lower for x in ["surge", "plunge", "spike", "drop", "jump"]):
-                            words = re.findall(r'\b[a-zA-Z]{6,}\b', t_lower)
-                            for nw in words:
-                                sent, f_alpha = analyze_honest_bias(entry.title, 0) # Base 0 para novos termos
-                                if abs(f_alpha) > 1.0:
-                                    data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Cat": f"Validação: {nw}", "Sent": sent, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Novo", "Termo": nw}
-                                    pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
+                    # Aprendizado Contextual de Novos Termos
+                    if not found and any(x in t_lower for x in ["surge", "plunge", "spike", "drop"]):
+                        words = re.findall(r'\b[a-zA-Z]{7,}\b', t_lower)
+                        for nw in words:
+                            sent, f_alpha = calculate_honest_bias(entry.title, 0)
+                            if abs(f_alpha) > 1.0:
+                                data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Cat": f"Validação: {nw}", "Link": entry.link, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Novo"}
+                                pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
-# --- 6. INTERFACE (UI) COM REGRAS DE 2026 ---
+# --- 6. INTERFACE UI (OTIMIZADA PARA FOTO) ---
 def main():
-    st.set_page_config(page_title="V37 MASTER - CONTEXTUAL", layout="wide")
-    # Estilo para foto (Navy/Neon, sem brilho branco)
+    st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide")
     st.markdown("""<style>
-        .stApp, [data-testid="stSidebar"], .stSidebar { background-color: #050C1A !important; }
+        .stApp, [data-testid="stSidebar"] { background-color: #050C1A !important; }
         * { color: #E0E0E0 !important; }
         div[data-baseweb="input"], input { background-color: #0D1B2A !important; color: #64FFDA !important; border: 1px solid #1B2B48 !important; }
-        div[data-testid="stDataFrame"] td { background-color: #050C1A !important; font-weight: bold !important; border-bottom: 1px solid #1B2B48 !important; font-size: 15px !important; }
+        div[data-testid="stDataFrame"] td { background-color: #050C1A !important; font-weight: bold !important; border-bottom: 1px solid #1B2B48 !important; }
         .status-on { color: #39FF14 !important; font-weight: bold; }
     </style>""", unsafe_allow_html=True)
 
@@ -115,41 +116,40 @@ def main():
         threading.Thread(target=news_monitor, daemon=True).start()
         st.session_state['monitor'] = True
 
-    # Sidebar com todos os dados vivos
     with st.sidebar:
         st.header("📡 SITES ONLINE")
         for s in RSS_SOURCES.keys(): st.markdown(f"• {s}: <span class='status-on'>ATIVO</span>", unsafe_allow_html=True)
         st.divider()
-        st.header("🧠 22 LEXICONS ATIVOS")
+        st.header("LEXICON ATIVO")
         for k, v in LEXICON_TOPICS.items(): st.caption(f"• {v[2]}")
 
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('TS', ascending=False)
         
-        # Consolidação de Categorias (Lógica de 6 termos)
-        for side in ["NARRATIVA BULLISH", "NARRATIVA BEARISH"]:
-            target = "COMPRA" if "BULLISH" in side else "VENDA"
-            novos = df[(df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target))]['Termo'].unique()
-            if len(novos) >= 6:
-                df.loc[(df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target)), 'Cat'] = side
+        # Consolidação Automática (Lógica de 6 termos)
+        for cat_label in ["NARRATIVA BULLISH", "NARRATIVA BEARISH"]:
+            target = "COMPRA" if "BULLISH" in cat_label else "VENDA"
+            termos_novos = df[(df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target))]['Termo'].unique()
+            if len(termos_novos) >= 6:
+                df.loc[(df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target)), 'Cat'] = cat_label
 
-        # Título e Pesquisa
-        c1, c2 = st.columns([2, 1])
+        c1, c2 = st.columns([3, 1])
         with c1:
-            st.title("🛢️ QUANT STATION V37")
-            search = st.text_input("🔍 FILTRAR FLUXO (Navy Box)", "")
+            st.title("TERMINAL - OIL")
+            search = st.text_input("FILTRAR FLUXO", "")
         with c2:
-            # Velocímetro Realista
             avg_a = df['Alpha'].mean()
             prob = 100 / (1 + np.exp(-0.15 * (avg_a or 0)))
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=prob, number={'suffix': "%"}, gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#64FFDA"}}))
-            fig.update_layout(height=140, margin=dict(t=0, b=0), paper_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig, width='stretch')
+            st.metric("FORÇA DO FLUXO", f"{prob:.1f}%")
 
-        tab_fluxo, tab_heat = st.tabs(["📝 FLUXO INTEGRADO", "🗺️ HEATMAP"])
+        tab_fluxo, tab_heat = st.tabs(["FLUXO COM LINKS", "HEATMAP"])
         with tab_fluxo:
-            if search: df = df[df['Manchete'].str.contains(search, case=False) | df['Cat'].str.contains(search, case=False)]
-            st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Sent', 'Cat']].head(60), width='stretch')
+            if search: df = df[df['Manchete'].str.contains(search, case=False)]
+            st.dataframe(
+                df[['Hora', 'Fonte', 'Manchete', 'Sent', 'Cat', 'Link']].head(60),
+                column_config={"Link": st.column_config.LinkColumn("Fonte", display_text="Link")},
+                width='stretch'
+            )
         with tab_heat:
             cat_df = df['Cat'].value_counts(normalize=True).reset_index()
             fig_tree = px.treemap(cat_df, path=['Cat'], values='proportion', color_discrete_sequence=['#0D1B2A', '#64FFDA'])
