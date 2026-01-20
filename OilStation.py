@@ -10,8 +10,8 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
-st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v60_refresh")
+st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ANALYTICS", layout="wide", initial_sidebar_state="collapsed")
+st_autorefresh(interval=60000, key="v62_refresh")
 
 st.markdown("""
     <style>
@@ -33,18 +33,29 @@ st.markdown("""
         color: #00FFC8;
         margin-bottom: 20px;
     }
+
+    /* Container de Scroll para Notícias */
+    .scroll-container {
+        height: 450px;
+        overflow-y: auto;
+        padding-right: 10px;
+        border: 1px solid rgba(30, 41, 59, 0.5);
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.1);
+    }
+    .scroll-container::-webkit-scrollbar { width: 4px; }
+    .scroll-container::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 10px; }
     
     table { width: 100%; border-collapse: collapse; }
-    th { color: #94A3B8 !important; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 10px 5px; text-align: left; }
-    td { font-size: 13px; padding: 10px 5px; border-bottom: 1px solid #0D1421; }
+    th { color: #94A3B8 !important; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 10px 5px; text-align: left; position: sticky; top: 0; background: #050A12; z-index: 10; }
+    td { font-size: 12px; padding: 10px 5px; border-bottom: 1px solid #0D1421; }
     .pos-score { color: #00FFC8; font-weight: bold; }
     .neg-score { color: #FF4B4B; font-weight: bold; }
-    .neu-score { color: #64748B; font-style: italic; }
     a { color: #00FFC8 !important; text-decoration: none; font-size: 10px; font-weight: 700; border: 1px solid #00FFC8; padding: 2px 5px; border-radius: 3px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. BASE DE DADOS (20 SITES / 22 LEXICONS) ---
+# --- 2. BASE DE DADOS (MANTIDOS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -93,8 +104,8 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
 
-# --- 3. MOTOR DE INTELIGÊNCIA COM ARMAZENAMENTO HISTÓRICO ---
-def fetch_news_and_store():
+# --- 3. MOTOR DE INTELIGÊNCIA COM FILTRAGEM ESTRITA ---
+def fetch_and_filter_news():
     news_data = []
     DB_FILE = "Oil_Station_V54_Master.csv"
     
@@ -102,29 +113,32 @@ def fetch_news_and_store():
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:5]:
-                score, cat = 0.0, "Neutral"
+                score, cat = 0.0, None
                 title_low = entry.title.lower()
+                
+                # Só processa se houver match em algum lexicon relevante
                 for patt, (w, d, c) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         score = float(w * d)
                         cat = c
                         break
                 
-                news_data.append({
-                    "Data": datetime.now().strftime("%H:%M:%S"),
-                    "Fonte": name,
-                    "Manchete": entry.title[:90],
-                    "Alpha": score,
-                    "Cat": cat,
-                    "Link": entry.link
-                })
+                # REGRA: Só adiciona se o Alpha for diferente de zero (Remoção automática de irrelevantes)
+                if score != 0:
+                    news_data.append({
+                        "Data": datetime.now().strftime("%H:%M:%S"),
+                        "Fonte": name,
+                        "Manchete": entry.title[:90],
+                        "Alpha": score,
+                        "Cat": cat,
+                        "Link": entry.link
+                    })
         except: continue
 
     if news_data:
         df_new = pd.DataFrame(news_data)
         if os.path.exists(DB_FILE):
             df_old = pd.read_csv(DB_FILE)
-            # Une novo com antigo e remove duplicatas de manchete
             df_final = pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300)
             df_final.to_csv(DB_FILE, index=False)
         else:
@@ -145,69 +159,56 @@ def get_market_data():
 
 # --- 4. RENDERIZAÇÃO ---
 def main():
-    fetch_news_and_store()
+    fetch_and_filter_news()
     prices = get_market_data()
     DB_FILE = "Oil_Station_V54_Master.csv"
     
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
-    
-    # Cálculo do Alpha: Pega as últimas 20 notícias que NÃO são zero
-    filtered_alpha = df_news[df_news['Alpha'] != 0]
-    avg_alpha = filtered_alpha['Alpha'].head(20).mean() if not filtered_alpha.empty else 0.0
+    avg_alpha = df_news['Alpha'].head(30).mean() if not df_news.empty else 0.0
 
-    # Live Feed
-    last_news = df_news.iloc[0]['Manchete'] if not df_news.empty else "Varredura iniciada..."
     st.markdown(f"""
         <div class="live-feed">
-            [SISTEMA ATIVO] {datetime.now().strftime('%H:%M:%S')} - ANALISANDO: {last_news[:80]}
+            [FILTRO ATIVO] {datetime.now().strftime('%H:%M:%S')} - ANALISANDO APENAS COMMODITIES & MACRO
         </div>
     """, unsafe_allow_html=True)
 
-    tab1, tab2 = st.tabs(["TERMINAL OPERACIONAL", "ANÁLISE ESTRUTURAL"])
+    c1, c2, c3 = st.columns(3)
+    c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}" if not np.isnan(prices['WTI']) else "nan")
+    c2.metric("IA ALPHA SCORE", f"{avg_alpha:.2f}")
+    c3.metric("DXY INDEX", f"{prices['DXY']:.2f}" if not np.isnan(prices['DXY']) else "nan")
 
-    with tab1:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}" if not np.isnan(prices['WTI']) else "nan")
-        c2.metric("IA ALPHA SCORE", f"{avg_alpha:.2f}", delta=f"{avg_alpha*0.05:.2f}")
-        c3.metric("DXY INDEX", f"{prices['DXY']:.2f}" if not np.isnan(prices['DXY']) else "nan")
+    st.markdown("---")
+    
+    col_gauge, col_table = st.columns([1, 2])
+    
+    with col_gauge:
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number", value=avg_alpha,
+            title={'text': "SENTIMENTO (30D)", 'font': {'size': 14, 'color': '#94A3B8'}},
+            gauge={
+                'axis': {'range': [-10, 10], 'tickcolor': "#1E293B"},
+                'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"},
+                'bgcolor': "rgba(0,0,0,0)",
+                'steps': [{'range': [-10, 10], 'color': 'rgba(255,255,255,0.02)'}]
+            }
+        ))
+        fig.update_layout(height=350, margin=dict(t=80, b=20, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+        st.plotly_chart(fig, width='stretch')
 
-        st.markdown("---")
-        
-        col_gauge, col_table = st.columns([1.2, 2])
-        
-        with col_gauge:
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number", value=avg_alpha,
-                title={'text': "SENTIMENTO DINÂMICO", 'font': {'size': 14, 'color': '#94A3B8'}},
-                gauge={
-                    'axis': {'range': [-10, 10], 'tickcolor': "#1E293B"},
-                    'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"},
-                    'bgcolor': "rgba(0,0,0,0)",
-                    'steps': [
-                        {'range': [-10, -5], 'color': 'rgba(255, 75, 75, 0.1)'},
-                        {'range': [5, 10], 'color': 'rgba(0, 255, 200, 0.1)'}
-                    ]
-                }
-            ))
-            fig.update_layout(height=350, margin=dict(t=80, b=20, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col_table:
-            if not df_news.empty:
-                df_display = df_news.head(15).copy()
-                
-                def color_logic(val):
-                    if val > 0: return f'<span class="pos-score">{val}</span>'
-                    if val < 0: return f'<span class="neg-score">{val}</span>'
-                    return f'<span class="neu-score">0.0 (Irrelevante)</span>'
-                
-                df_display['Alpha'] = df_display['Alpha'].apply(color_logic)
-                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">VER NOTÍCIA</a>')
-                
-                st.markdown(df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    with tab2:
-        st.info("O Terminal agora armazena até 300 manchetes históricas. O Alpha Score é recalculado ignorando ruídos neutros.")
+    with col_table:
+        if not df_news.empty:
+            df_display = df_news.copy()
+            
+            def color_logic(val):
+                color = "pos-score" if val > 0 else "neg-score"
+                return f'<span class="{color}">{val}</span>'
+            
+            df_display['Alpha'] = df_display['Alpha'].apply(color_logic)
+            df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">NEWS</a>')
+            
+            # Encapsulando em container de Scroll
+            table_html = df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False)
+            st.markdown(f'<div class="scroll-container">{table_html}</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
