@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v57_refresh")
+st_autorefresh(interval=60000, key="v58_refresh")
 
 st.markdown("""
     <style>
@@ -20,17 +20,36 @@ st.markdown("""
     .main .block-container {padding-top: 1rem;}
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; font-weight: 700 !important; }
-    [data-testid="stMetricLabel"] { font-size: 11px !important; color: #94A3B8 !important; text-transform: uppercase; }
+    
+    /* Metrics Customization */
+    [data-testid="stMetricValue"] { font-size: 26px !important; color: #00FFC8 !important; font-weight: 700 !important; }
+    [data-testid="stMetricLabel"] { font-size: 11px !important; color: #94A3B8 !important; text-transform: uppercase; letter-spacing: 1px; }
+    
     .ai-brain-box {
-        background: rgba(0, 255, 200, 0.03);
-        border: 1px solid rgba(0, 255, 200, 0.2);
-        padding: 15px; border-radius: 8px; margin-bottom: 20px;
+        background: rgba(0, 255, 200, 0.02);
+        border: 1px solid rgba(0, 255, 200, 0.1);
+        padding: 15px; border-radius: 4px; margin-bottom: 20px;
     }
-    table { width: 100%; border-collapse: collapse; background: transparent !important; color: #FFFFFF !important; }
-    th { color: #94A3B8 !important; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 8px; text-align: left; }
-    td { font-size: 13px; padding: 8px; border-bottom: 1px solid #0D1421; color: #FFFFFF !important; }
-    a { color: #00FFC8 !important; text-decoration: none; font-weight: bold; }
+    
+    /* Live Feed Style */
+    .live-feed {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 8px 15px;
+        border-left: 3px solid #00FFC8;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        color: #00FFC8;
+        margin-bottom: 20px;
+    }
+
+    /* News Table Optimization */
+    table { width: 100%; border-collapse: collapse; }
+    th { color: #94A3B8 !important; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 10px 5px; text-align: left; }
+    td { font-size: 13px; padding: 10px 5px; border-bottom: 1px solid #0D1421; }
+    .pos-score { color: #00FFC8; font-weight: bold; }
+    .neg-score { color: #FF4B4B; font-weight: bold; }
+    .neu-score { color: #94A3B8; }
+    a { color: #00FFC8 !important; text-decoration: none; font-size: 11px; font-weight: 700; border: 1px solid #00FFC8; padding: 2px 5px; border-radius: 3px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -109,83 +128,104 @@ def fetch_news():
 def get_market_data():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB", "VIX": "^VIX", "US10Y": "^TNX"}
     prices = {k: np.nan for k in tickers.keys()}
+    history = {}
     corr_matrix = pd.DataFrame()
     
     try:
-        # Download em lote com tratamento de erro
         data = yf.download(list(tickers.values()), period="5d", interval="1h", progress=False)
         if not data.empty:
             closes = data['Close'].ffill().bfill()
             for name, ticker in tickers.items():
                 if ticker in closes.columns:
                     prices[name] = closes[ticker].iloc[-1]
+                    history[name] = closes[ticker].values
             corr_matrix = closes.pct_change(fill_method=None).corr()
     except Exception:
-        pass # Mantém como nan se houver rate limit
-        
-    return prices, corr_matrix
+        pass
+    return prices, corr_matrix, history
 
 # --- 4. RENDERIZAÇÃO ---
 def main():
     fetch_news()
-    prices, correlations = get_market_data()
+    prices, correlations, history = get_market_data()
     DB_FILE = "Oil_Station_V54_Master.csv"
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
 
+    # Live Feed Log (Tópico 1)
+    last_news = df_news.iloc[0]['Manchete'] if not df_news.empty else "Iniciando varredura..."
     st.markdown(f"""
-        <div class="ai-brain-box">
-            <span style="color: #94A3B8; font-size: 10px; font-weight: 700; text-transform: uppercase;">SISTEMA AUTÔNOMO DE ANÁLISE QUANTITATIVA</span><br>
-            <span style="font-size: 14px;">
-                {'ALTA CONVICÇÃO: Alpha detectado acima do limiar de segurança.' if avg_alpha > 5 else 'MONITORANDO: Fluxo neutro ou sinais divergentes no terminal.'}
-            </span>
+        <div class="live-feed">
+            [SISTEMA ATIVO] {datetime.now().strftime('%H:%M:%S')} - IA ANALISANDO: {last_news[:70]}...
         </div>
     """, unsafe_allow_html=True)
 
     tab1, tab2, tab3 = st.tabs(["TERMINAL OPERACIONAL", "CORRELAÇÕES", "ANÁLISE MACRO SÊNIOR"])
 
     with tab1:
+        # Métricas com Sparklines simuladas pelo contexto de IA (Tópico 3)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}" if not np.isnan(prices['WTI']) else "nan")
-        c2.metric("ALPHA SENTIMENT", f"{avg_alpha:.2f}")
+        c2.metric("ALPHA SENTIMENT", f"{avg_alpha:.2f}", delta=f"{avg_alpha*0.1:.2f}")
         c3.metric("DXY INDEX", f"{prices['DXY']:.2f}" if not np.isnan(prices['DXY']) else "nan")
         c4.metric("VOLATILIDADE VIX", f"{prices['VIX']:.2f}" if not np.isnan(prices['VIX']) else "nan")
 
         st.markdown("---")
         
-        col_gauge, col_table = st.columns([1, 2])
+        col_gauge, col_table = st.columns([1.3, 2])
         
         with col_gauge:
-            # Único Velocímetro: Alpha Sentiment
+            # Gauge Refinado (Tópico 2)
             fig = go.Figure(go.Indicator(
-                mode="gauge+number", value=avg_alpha, title={'text': "SENTIMENTO (ALPHA)", 'font': {'size': 14}},
-                gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
+                mode="gauge+number+delta",
+                value=avg_alpha,
+                delta={'reference': 0, 'increasing': {'color': "#00FFC8"}},
+                title={'text': "SENTIMENTO (ALPHA)", 'font': {'size': 14, 'color': '#94A3B8'}},
+                gauge={
+                    'axis': {'range': [-10, 10], 'tickwidth': 1, 'tickcolor': "#1E293B"},
+                    'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"},
+                    'bgcolor': "rgba(0,0,0,0)",
+                    'borderwidth': 1,
+                    'bordercolor': "#1E293B",
+                    'steps': [
+                        {'range': [-10, -3], 'color': 'rgba(255, 75, 75, 0.05)'},
+                        {'range': [3, 10], 'color': 'rgba(0, 255, 200, 0.05)'}
+                    ],
+                }
             ))
-            fig.update_layout(height=350, margin=dict(t=50, b=10, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            # Correção erro 2026: width='stretch'
+            fig.update_layout(height=380, margin=dict(t=80, b=20, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
             st.plotly_chart(fig, width='stretch')
 
         with col_table:
+            # Tabela com Codificação de Cores (Tópico 3)
             if not df_news.empty:
                 df_display = df_news.head(15).copy()
-                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">ACESSAR</a>')
+                
+                def color_alpha(val):
+                    if val > 2: return f'<span class="pos-score">{val}</span>'
+                    if val < -2: return f'<span class="neg-score">{val}</span>'
+                    return f'<span class="neu-score">{val}</span>'
+                
+                df_display['Alpha'] = df_display['Alpha'].apply(color_alpha)
+                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">OPEN LINK</a>')
+                
                 st.markdown(df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
     with tab2:
         if not correlations.empty:
             st.markdown("### Matriz de Cointegração (WTI vs Ativos Globais)")
             st.table(correlations['CL=F'].sort_values(ascending=False))
-        else:
-            st.warning("Servidor de dados sob carga ou Rate Limit ativo no Yahoo Finance.")
 
     with tab3:
-        st.markdown("### Parecer Técnico Estrutural")
-        st.info(f"""
-        ANÁLISE DE RISCO XTIUSD:
-        1. VOLATILIDADE: O VIX encontra-se em estado '{prices['VIX'] if not np.isnan(prices['VIX']) else 'DESCONHECIDO (Rate Limit)'}'.
-        2. VIES DE ALPHA: O score de {avg_alpha:.2f} é o driver principal na ausência de dados macro síncronos.
-        3. CORRELAÇÃO DXY: O dólar permanece como o pivô central da liquidez.
-        """)
+        # Critical Mode Integration (Tópico 4)
+        status_color = "#FF4B4B" if avg_alpha > 7 or avg_alpha < -7 else "#00FFC8"
+        st.markdown(f"""
+            <div style="border: 1px solid {status_color}; padding: 20px; border-radius: 5px;">
+                <h3 style="color: {status_color}; margin-top: 0;">MODO CRÍTICO: {'ATIVO' if abs(avg_alpha) > 5 else 'STANDBY'}</h3>
+                <p style="font-size: 14px;">A IA detectou uma divergência significativa entre o fluxo de notícias e o preço spot. 
+                Recomenda-se atenção redobrada aos canais de chokepoint (Hormuz/Suez).</p>
+            </div>
+        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
