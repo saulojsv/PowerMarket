@@ -16,8 +16,9 @@ try:
 except ImportError:
     st_autorefresh = None
 
-# --- PARÂMETROS ECONOMÉTRICOS ---
-DB_FILE = "Oil_Chaos_Master_Log.xlsx"
+# --- PARÂMETROS ECONÔMICOS ---
+# Mudei o nome para forçar a criação de um arquivo novo sem erro de colunas
+DB_FILE = "Oil_Station_PRO_v1.xlsx"
 HALFLIFE_MINUTES = 60  
 VOLATILITY_THRESHOLD = 12.0  
 
@@ -60,28 +61,27 @@ def calculate_complex_alpha(title):
     direction = 0
     category = "Geral"
     multiplier = 1.0
-    
     for pattern, params in LEXICON_TOPICS.items():
         if re.search(pattern, title_lower):
             base_alpha += params[0]
             if direction == 0: 
                 direction = params[1]
                 category = params[2]
-            
     for pattern, mod_value in LEXICON_MODIFIERS.items():
         if re.search(pattern, title_lower):
             multiplier *= mod_value
-            
     return (base_alpha * direction * multiplier), category
 
 def apply_time_decay(df):
-    if df.empty: return df
-    df['Timestamp'] = pd.to_datetime(df['Data_Full'])
-    now = datetime.now()
-    lam = np.log(2) / HALFLIFE_MINUTES
-    df['Minutes_Ago'] = (now - df['Timestamp']).dt.total_seconds() / 60
-    df['Alpha_Decayed'] = df['Alpha'] * np.exp(-lam * df['Minutes_Ago'])
-    return df[(df['Minutes_Ago'] < 360) & (abs(df['Alpha_Decayed']) > 0.05)].copy()
+    try:
+        if df.empty or 'Data_Full' not in df.columns: return df
+        df['Timestamp'] = pd.to_datetime(df['Data_Full'])
+        now = datetime.now()
+        lam = np.log(2) / HALFLIFE_MINUTES
+        df['Minutes_Ago'] = (now - df['Timestamp']).dt.total_seconds() / 60
+        df['Alpha_Decayed'] = df['Alpha'] * np.exp(-lam * df['Minutes_Ago'])
+        return df[(df['Minutes_Ago'] < 360) & (abs(df['Alpha_Decayed']) > 0.05)].copy()
+    except: return pd.DataFrame()
 
 def calculate_probability(net_alpha):
     k = 0.20
@@ -110,12 +110,12 @@ def news_monitor():
                         alpha, cat = calculate_complex_alpha(title)
                         if abs(alpha) > 0.5:
                             save_data({
-                                "Data": datetime.now().strftime("%Y-%m-%d"),
-                                "Hora": datetime.now().strftime("%H:%M:%S"),
+                                "Data_Full": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "Data_Hora": datetime.now().strftime("%H:%M:%S"),
                                 "Fonte": source,
                                 "Manchete": title,
                                 "Categoria": cat,
-                                "Taxa Alpha": alpha
+                                "Alpha": alpha
                             })
                         seen.add(title)
             except: pass
@@ -124,12 +124,10 @@ def news_monitor():
 def main():
     st.set_page_config(page_title="QUANT STATION PRO", layout="wide", page_icon="🛢️")
 
-    # CORREÇÃO DO CSS (unsafe_allow_html=True)
     st.markdown("""
         <style>
-        .stApp { background-color: #000000; color: #E0E0E0; }
+        .stApp { background-color: #000000 !important; color: #E0E0E0 !important; }
         [data-testid="stMetricValue"] { font-family: 'Roboto Mono', monospace; font-size: 42px; font-weight: bold; }
-        h1, h2, h3 { letter-spacing: 1px; text-transform: uppercase; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -140,49 +138,36 @@ def main():
         threading.Thread(target=news_monitor, daemon=True).start()
         st.session_state['monitor_active'] = True
 
-    st.title("STATION: INSTITUTIONAL FEED")
+    st.title("OIL: MONITORIZAÇÃO")
     
     if os.path.exists(DB_FILE):
-        df_raw = pd.read_excel(DB_FILE)
-        if not df_raw.empty:
-            df = apply_time_decay(df_raw)
-            net_alpha = df['Alpha_Decayed'].sum()
-            sentiment_buy = calculate_probability(net_alpha)
-            
-            # --- ALERTA CISNE NEGRO ---
-            last_entry = df_raw.iloc[-1]
-            if abs(last_entry['Alpha']) >= VOLATILITY_THRESHOLD:
-                color = "#FF0000" if last_entry['Alpha'] < 0 else "#00FF00"
-                st.markdown(f'<div style="border:3px solid {color};padding:15px;text-align:center;">'
-                            f'<h2 style="color:{color};">⚠️ IMPACTO MUITO ALTO: {last_entry["Alpha"]:.1f} ALPHA</h2>'
-                            f'</div>', unsafe_allow_html=True)
+        try:
+            df_raw = pd.read_excel(DB_FILE)
+            if not df_raw.empty and 'Data_Full' in df_raw.columns:
+                df = apply_time_decay(df_raw)
+                net_alpha = df['Alpha_Decayed'].sum() if not df.empty else 0
+                sentiment_buy = calculate_probability(net_alpha)
+                
+                # DASHBOARD
+                c1, c2, c3 = st.columns([1, 1, 2])
+                with c1: st.metric("PROB. COMPRA", f"{sentiment_buy:.1f}%", f"{net_alpha:.2f} Net Alpha")
+                with c2: st.metric("VELOCIDADE (1H)", f"{len(df[df['Minutes_Ago'] < 60]) if not df.empty else 0} news")
+                with c3:
+                    if not df.empty:
+                        df_chart = df.sort_values('Timestamp')
+                        df_chart['Cumulative_Decayed'] = df_chart['Alpha_Decayed'].cumsum()
+                        fig = px.area(df_chart, x="Data_Hora", y="Cumulative_Decayed", template="plotly_dark")
+                        fig.update_layout(height=250, margin=dict(l=0,r=0,t=0,b=0))
+                        st.plotly_chart(fig, use_container_width=True)
 
-            # --- DASHBOARD ---
-            c1, c2, c3 = st.columns([1, 1, 2])
-            with c1:
-                st.metric("PROB. COMPRA", f"{sentiment_buy:.1f}%", f"{net_alpha:.2f} Net Alpha")
-            with c2:
-                st.metric("VELOCIDADE (1H)", f"{len(df[df['Minutes_Ago'] < 60])} news")
-            with c3:
-                df_chart = df.sort_values('Timestamp')
-                df_chart['Cumulative_Decayed'] = df_chart['Alpha_Decayed'].cumsum()
-                fig = px.area(df_chart, x="Data_Hora", y="Cumulative_Decayed", template="plotly_dark")
-                fig.update_layout(height=250, margin=dict(l=0,r=0,t=0,b=0))
-                st.plotly_chart(fig, use_container_width=True)
-
-            # --- HEATMAP ---
-            st.divider()
-            src_grp = df.groupby('Fonte')['Alpha_Decayed'].sum().reset_index()
-            cols = st.columns(len(src_grp)) if not src_grp.empty else [st]
-            for idx, row in src_grp.iterrows():
-                color = "#44FF44" if row['Alpha_Decayed'] > 0 else "#FF4444"
-                cols[idx % 4].markdown(f'<div style="border:1px solid #333;text-align:center;padding:5px;">'
-                                       f'<small>{row["Fonte"]}</small><br><b style="color:{color};">{row["Alpha_Decayed"]:.1f}</b>'
-                                       f'</div>', unsafe_allow_html=True)
-
-            st.dataframe(df[['Data_Hora', 'Fonte', 'Categoria', 'Manchete', 'Alpha']].sort_values(by="Data_Hora", ascending=False), use_container_width=True)
+                st.divider()
+                st.dataframe(df[['Data_Hora', 'Fonte', 'Categoria', 'Manchete', 'Alpha']].sort_values(by="Data_Hora", ascending=False), use_container_width=True)
+            else:
+                st.info("Aguardando novas notícias para calibrar o modelo de decaimento...")
+        except Exception as e:
+            st.error(f"Erro na leitura dos dados: {e}")
     else:
-        st.info("Aguardando fluxo de dados...")
+        st.info("Inicializando base de dados... O fundo ficará preto assim que a primeira notícia for processada.")
 
 if __name__ == "__main__":
     main()
