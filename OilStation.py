@@ -12,52 +12,74 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO DE PÁGINA E ESTILO ---
-st.set_page_config(page_title="XTIUSD - Terminal dos Bigodin", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TERMINAL XTIUSD | OS BIGODERAS", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v54_refresh")
 
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         .stApp { background-color: #02060C; color: #E0E0E0; font-family: 'JetBrains Mono', monospace; }
-        [data-testid="stMetricValue"] { font-size: 28px !important; color: #64FFDA !important; }
-        div[data-testid="stMetric"] { background-color: #0B121D; border-left: 5px solid #64FFDA; padding: 15px; border-radius: 5px; }
+        [data-testid="stMetricValue"] { font-size: 26px !important; color: #39FF14 !important; }
+        [data-testid="stMetricLabel"] { color: #8a96a3 !important; font-size: 12px !important; text-transform: uppercase; }
+        div[data-testid="stMetric"] { background-color: #0B121D; border-left: 5px solid #39FF14; padding: 15px; border-radius: 5px; }
         .stDataFrame { border: 1px solid #1B2B48; border-radius: 10px; }
         .decision-card { padding: 25px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 32px; border: 2px solid; margin-bottom: 20px; }
-        h1, h2, h3 { color: #64FFDA; text-transform: uppercase; letter-spacing: 2px; }
+        h1, h2, h3 { color: #39FF14 !important; text-transform: uppercase; letter-spacing: 2px; }
+        .live-status { color: #39FF14; font-weight: bold; animation: blinker 1.5s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0.1; } }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CONFIGURAÇÕES DE DADOS ---
+# --- 2. CONFIGURAÇÕES DE DADOS (EXPANDIDO) ---
 DB_FILE = "Oil_Station_V54_Master.csv"
 BRAIN_FILE = "Market_Brain_V54.csv"
 
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
-    "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
-    "Investing": "https://www.investing.com/rss/news_11.rss",
-    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
-    "EIA": "https://www.eia.gov/about/rss/todayinenergy.xml"
+    "Reuters Energy": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
+    "Investing Oil": "https://www.investing.com/rss/news_11.rss",
+    "CNBC Energy": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
+    "EIA Reports": "https://www.eia.gov/about/rss/todayinenergy.xml",
+    "MarketWatch": "http://feeds.marketwatch.com/marketwatch/marketpulse/",
+    "Bloomberg Energy": "https://www.bloomberg.com/feeds/bpol/sitemap_news.xml", # Simulação via agregador
+    "Yahoo Finance": "https://finance.yahoo.com/rss/headline?s=CL=F" # Petróleo Futuro
 }
 
 LEXICON_TOPICS = {
-    r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
-    r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
-    r"iran|strait of hormuz|red sea|houthis|bab al-mandab": [9.8, 1, "Risco de Chokepoint"],
-    r"opec|saudi|cut|quota|production curb|voluntary": [9.0, 1, "Política OPEP+"],
-    r"shale|fracking|permian|rig count|drilling": [7.0, -1, "Oferta EUA (Shale)"],
-    r"inventory|stockpile|draw|drawdown|depletion": [7.0, 1, "Estoques (Déficit)"],
-    r"build|glut|oversupply|surplus": [7.0, -1, "Estoques (Excesso)"],
-    r"recession|slowdown|weak|contracting|hard landing": [8.5, -1, "Macro (Recessão)"],
-    r"fed|rate hike|hawkish|inflation|cpi": [7.0, -1, "Macro (Aperto)"],
-    r"dovish|rate cut|powell|liquidity|easing": [7.0, 1, "Macro (Estímulo)"],
-    r"dollar|dxy|greenback|fx": [6.5, -1, "Correlação DXY"]
+    # BLOCO GEOPOLÍTICO (PESO MÁXIMO)
+    r"war|attack|missile|drone|strike|conflict|escalation|invasion|military": [9.8, 1, "Geopolítica (Conflito)"],
+    r"sanction|embargo|ban|price cap|seizure|blockade|nuclear": [9.0, 1, "Geopolítica (Sanções)"],
+    r"iran|strait of hormuz|red sea|houthis|bab al-mandab|suez": [9.8, 1, "Risco de Chokepoint"],
+    r"israel|gaza|hezbollah|lebanon|tehran|kremlin|ukraine": [9.2, 1, "Tensões Regionais"],
+    
+    # BLOCO OPEP+ E OFERTA
+    r"opec|saudi|russia|novak|bin salman|cut|quota|output curb": [9.5, 1, "Política OPEP+"],
+    r"voluntary cut|unwinding|compliance|production target": [8.5, 1, "Oferta OPEP+"],
+    r"shale|fracking|permian|rig count|drilling|bakken|spr": [7.5, -1, "Oferta EUA (Shale)"],
+    
+    # BLOCO ESTOQUES E FUNDAMENTOS
+    r"inventory|stockpile|draw|drawdown|depletion|api|eia": [8.0, 1, "Estoques (Déficit)"],
+    r"build|glut|oversupply|surplus|storage full": [8.0, -1, "Estoques (Excesso)"],
+    r"refinery|outage|maintenance|gasoline|distillates": [7.0, 1, "Refino/Margens"],
+    
+    # BLOCO MACRO E DEMANDA
+    r"recession|slowdown|weak|contracting|hard landing|china": [8.8, -1, "Macro (Demanda Fraca)"],
+    r"demand surge|recovery|consumption|growth|stimulus": [8.2, 1, "Macro (Demanda Forte)"],
+    r"fed|rate hike|hawkish|inflation|cpi|interest rate": [7.5, -1, "Macro (Aperto Fed)"],
+    r"dovish|rate cut|powell|liquidity|easing|soft landing": [7.5, 1, "Macro (Estímulo Fed)"],
+    r"dollar|dxy|greenback|fx|yields": [7.0, -1, "Correlação DXY"],
+    
+    # BLOCO ESPECULATIVO
+    r"hedge funds|bullish|bearish|short covering|positioning": [6.5, 1, "Fluxo Especulativo"],
+    r"technical break|resistance|support|moving average": [6.0, 1, "Análise Técnica"]
 }
 
 # --- 3. MOTOR DE INTELIGÊNCIA ---
 def get_auto_category(word):
     w = word.lower()
-    if any(x in w for x in ["opec", "saudi", "cut"]): return "Política Energética"
-    if any(x in w for x in ["war", "strike", "attack"]): return "Risco Geopolítico"
+    if any(x in w for x in ["opec", "saudi", "russia", "cut"]): return "Política Energética"
+    if any(x in w for x in ["war", "strike", "iran", "attack"]): return "Risco Geopolítico"
+    if any(x in w for x in ["fed", "inflation", "rate"]): return "Macro/Fed"
     return "Driver Emergente"
 
 def update_brain(word, title):
@@ -92,7 +114,7 @@ def analyze_reality(title):
         graduados = pd.read_csv(BRAIN_FILE).query('Contagem >= 30')
         for _, row in graduados.iterrows():
             if row['Termo'].lower() in t_lower:
-                bias = 1.0 if any(x in t_lower for x in ["surge", "spike", "up", "jump"]) else -1.0
+                bias = 1.0 if any(x in t_lower for x in ["surge", "spike", "up", "jump", "higher"]) else -1.0
                 weights.append(row['Peso_Alpha'] * bias)
                 labels.append(f"IA:{row['Termo'].upper()}")
                 cats.append(row['Categoria'])
@@ -101,19 +123,17 @@ def analyze_reality(title):
 
     abs_weights = [abs(w) for w in weights]
     dominant_idx = abs_weights.index(max(abs_weights))
-    
-    # Lógica Sênior: Média Ponderada (Driver Dominante tem peso dobrado)
     weighted_sum = sum(weights) + weights[dominant_idx] 
     avg_alpha = weighted_sum / (len(weights) + 1)
     
     synergy = "CONVERGENTE" if all(w > 0 for w in weights) or all(w < 0 for w in weights) else "DIVERGENTE"
-    speculation_hit = 0.85 if any(x in t_lower for x in ["may", "could", "rumor"]) else 1.0
+    speculation_hit = 0.85 if any(x in t_lower for x in ["may", "could", "rumor", "possible"]) else 1.0
     
     prob = (1 / (1 + np.exp(-0.15 * abs(avg_alpha)))) * speculation_hit
     side = "COMPRA" if avg_alpha > 0 else "VENDA"
     interpretation = f"DOM: {labels[dominant_idx]} | {synergy} ({len(weights)} signals)"
     
-    if any(x in t_lower for x in ["surge", "plunge", "spike", "drop", "jump"]):
+    if any(x in t_lower for x in ["surge", "plunge", "spike", "drop", "jump", "crash"]):
         new_words = re.findall(r'\b[a-zA-Z]{7,}\b', t_lower)
         for nw in new_words: update_brain(nw, title)
 
@@ -142,13 +162,19 @@ def main():
         st.session_state['monitor'] = True
 
     c_head1, c_head2 = st.columns([3, 1])
-    with c_head1: st.markdown("#  TERMINAL XTIUSD <span style='color:white'></span>", unsafe_allow_html=True)
-    with c_head2: st.markdown(f"**STATUS:** <span style='color:#39FF14'>● LIVE FEED</span>\n\n{datetime.now().strftime('%H:%M:%S')}")
+    with c_head1: 
+        st.markdown("# TERMINAL DE ANÁLISE <span style='color:white'>V54 GOLD</span>", unsafe_allow_html=True)
+    with c_head2: 
+        st.markdown(f"""
+            <div style="text-align:right; font-family:monospace; font-size:14px; margin-top:10px;">
+                STATUS: <span class="live-status">● LIVE FEED</span><br>
+                <span style="color:#8a96a3;">{datetime.now().strftime('%H:%M:%S')}</span>
+            </div>
+        """, unsafe_allow_html=True)
 
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('TS', ascending=False)
         
-        # LINHA 1: KPIs
         st.divider()
         m1, m2, m3, m4 = st.columns(4)
         avg_a = df.head(30)['Alpha'].mean()
@@ -158,34 +184,47 @@ def main():
         m3.metric("DRIVERS ATIVOS", len(df.head(30)['Interpretation'].unique()))
         m4.metric("ALPHA MÁXIMO", f"{df.head(30)['Alpha'].max():.1f}")
 
-        # LINHA 2: Gauge e Decisão
         c_left, c_right = st.columns([1, 1.2])
         with c_left:
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=val, number={'suffix': "%", 'font': {'color': '#64FFDA'}},
-                             gauge={'axis': {'range': [0, 100]}, 'bar': {'color': '#64FFDA'}, 'steps': [{'range': [0, 30], 'color': '#FF4B4B'}, {'range': [70, 100], 'color': '#39FF14'}]}))
-            fig.update_layout(height=280, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig, use_container_width=True)
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number", 
+                value=val, 
+                number={'suffix': "%", 'font': {'color': '#39FF14', 'size': 40}},
+                gauge={
+                    'axis': {'range': [0, 100], 'tickwidth': 1},
+                    'bar': {'color': '#39FF14'},
+                    'steps': [
+                        {'range': [0, 30], 'color': '#FF4B4B'},
+                        {'range': [30, 70], 'color': '#111b27'},
+                        {'range': [70, 100], 'color': '#00FF41'}
+                    ]
+                }))
+            fig.update_layout(height=240, margin=dict(t=20, b=0, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            st.plotly_chart(fig, width='stretch')
+            
         with c_right:
             color = "#39FF14" if val >= 70 else "#FF4B4B" if val <= 30 else "#E0E0E0"
             label = "STRONG BUY" if val >= 70 else "STRONG SELL" if val <= 30 else "NEUTRAL / HEDGE"
             st.markdown(f'<div class="decision-card" style="color:{color}; border-color:{color}; background:rgba(255,255,255,0.03)">POSITION: {label}</div>', unsafe_allow_html=True)
-            st.info(f"**ECONOMIST INSIGHT:** O mercado é impulsionado por **{df.iloc[0]['Cat']}**. Sinais predominantes indicam um viés de {'ALTA' if avg_a > 0 else 'BAIXA'}.")
+            
+            insight_cat = df.iloc[0]['Cat'] if not df.empty else "N/A"
+            st.info(f"**ECONOMIST INSIGHT:** O mercado é impulsionado por **{insight_cat}**. Sinais predominantes indicam um viés de {'ALTA' if avg_a > 0 else 'BAIXA'}.")
 
-        # LINHA 3: Abas
-        t1, t2, t3 = st.tabs([" INTELLIGENCE FEED", " SECTOR MAP", "IA INTERPRETATION"])
+        t1, t2, t3 = st.tabs([" INTELLIGENCE FEED", "SECTOR MAP", "IA BRAIN"])
         with t1:
             st.dataframe(df[['Data', 'Manchete', 'Sent', 'Interpretation', 'Link']].head(100), 
-                         column_config={"Link": st.column_config.LinkColumn("FONTE", display_text="OPEN")}, use_container_width=True, hide_index=True)
+                         column_config={"Link": st.column_config.LinkColumn("FONTE", display_text="OPEN")}, 
+                         width='stretch', hide_index=True)
         with t2:
             c_h1, c_h2 = st.columns(2)
             with c_h1:
-                st.plotly_chart(px.treemap(df.head(100).groupby('Cat')['Alpha'].count().reset_index(name='Volume'), path=['Cat'], values='Volume', color='Volume', color_continuous_scale='GnBu', title="DOMINÂNCIA DE CATEGORIA"), use_container_width=True)
+                st.plotly_chart(px.treemap(df.head(100).groupby('Cat')['Alpha'].count().reset_index(name='Volume'), path=['Cat'], values='Volume', color='Volume', color_continuous_scale='GnBu', title="DOMINÂNCIA"), width='stretch')
             with c_h2:
-                st.plotly_chart(px.bar(df.head(100).groupby('Cat')['Alpha'].mean().reset_index(), x='Cat', y='Alpha', color='Alpha', color_continuous_scale='RdYlGn', title="SENTIMENTO POR SETOR"), use_container_width=True)
+                st.plotly_chart(px.bar(df.head(100).groupby('Cat')['Alpha'].mean().reset_index(), x='Cat', y='Alpha', color='Alpha', color_continuous_scale='RdYlGn', title="SENTIMENTO POR SETOR"), width='stretch')
         with t3:
             if os.path.exists(BRAIN_FILE):
                 st.dataframe(pd.read_csv(BRAIN_FILE).sort_values('Contagem', ascending=False), 
-                             column_config={"Contagem": st.column_config.ProgressColumn("PROGRESSO IA (30x)", min_value=0, max_value=30)}, use_container_width=True, hide_index=True)
+                             column_config={"Contagem": st.column_config.ProgressColumn("PROGRESSO IA (30x)", min_value=0, max_value=30)}, 
+                             width='stretch', hide_index=True)
 
 if __name__ == "__main__": main()
-
