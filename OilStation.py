@@ -113,7 +113,7 @@ def main():
         st.session_state['monitor_active'] = True
 
     with st.sidebar:
-        st.title("📡 Health Check")
+        st.title("Status Sites")
         health = check_feeds_health()
         for s, v in health.items():
             st.markdown(f"{s}: <span class='{'status-on' if v=='Ativo' else 'status-off'}'>{v}</span>", unsafe_allow_html=True)
@@ -146,7 +146,7 @@ def main():
             t1, t2 = st.tabs([" DATA STATION", " RATIONALE FREQUENCY"])
             
             with t1:
-                st.download_button("📥 DOWNLOAD CSV", df.to_csv(index=False).encode('utf-8'), "oil_v13.csv")
+                st.download_button("DOWNLOAD BASE DE DADOS", df.to_csv(index=False).encode('utf-8'), "oil_v13.csv")
                 st.dataframe(df[['Hora', 'Manchete', 'Categoria', 'Termo', 'Impacto_%']].sort_values('Hora', ascending=False), use_container_width=True)
 
             with t2:
@@ -175,3 +175,4 @@ def main():
         st.info("Aguardando novas entradas de dados...")
 
 if __name__ == "__main__": main()
+
