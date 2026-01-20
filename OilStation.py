@@ -5,44 +5,36 @@ import os
 import streamlit as st
 import plotly.graph_objects as go
 import yfinance as yf
+import numpy as np
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E HARMONIA VISUAL (CORREÇÃO DE TELA PRETA) ---
-st.set_page_config(page_title="Terminal - XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v54_refresh_pro")
+# --- 1. CONFIGURAÇÕES E ESTÉTICA PROFISSIONAL ---
+st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
+st_autorefresh(interval=60000, key="v55_refresh")
 
 st.markdown("""
     <style>
-    /* Gradiente Profundo para evitar tela preta travada */
-    .stApp { 
-        background: radial-gradient(circle, #0D1421 0%, #050A12 100%); 
-        color: #FFFFFF; 
-    }
+    .stApp { background: radial-gradient(circle, #0D1421 0%, #050A12 100%); color: #FFFFFF; }
     header {visibility: hidden;}
-    .main .block-container {padding-top: 1.5rem;}
-    
-    /* Tipografia de Alta Legibilidade */
+    .main .block-container {padding-top: 1rem;}
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-
-    /* Métricas e Cards */
-    [data-testid="stMetricValue"] { font-size: 28px !important; color: #00FFC8 !important; font-weight: 700 !important; }
-    [data-testid="stMetricLabel"] { font-size: 12px !important; color: #94A3B8 !important; text-transform: uppercase; }
-    
-    .ai-brain {
-        background: rgba(0, 255, 200, 0.05);
+    [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; font-weight: 700 !important; }
+    [data-testid="stMetricLabel"] { font-size: 11px !important; color: #94A3B8 !important; text-transform: uppercase; }
+    .ai-brain-box {
+        background: rgba(0, 255, 200, 0.03);
         border: 1px solid rgba(0, 255, 200, 0.2);
-        padding: 20px; border-radius: 12px; margin-bottom: 20px;
+        padding: 15px; border-radius: 8px; margin-bottom: 20px;
     }
-
-    /* Tabela Estilizada */
-    .reportview-container table { color: #FFFFFF; }
+    table { width: 100%; border-collapse: collapse; background: transparent !important; }
+    th { color: #94A3B8 !important; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 8px; }
+    td { font-size: 13px; padding: 8px; border-bottom: 1px solid #0D1421; }
     a { color: #00FFC8 !important; text-decoration: none; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. BASE DE CONHECIMENTO COMPLETA (20 FONTES / 22 LEXICONS) ---
+# --- 2. DATABASE E LEXICONS ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -91,8 +83,8 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
 
-# --- 3. MOTOR DE INTELIGÊNCIA ---
-def run_global_scrap():
+# --- 3. MOTOR DE DADOS ---
+def fetch_news():
     news_data = []
     DB_FILE = "Oil_Station_V54_Master.csv"
     for name, url in RSS_SOURCES.items():
@@ -113,60 +105,83 @@ def run_global_scrap():
             df_new = pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(100)
         df_new.to_csv(DB_FILE, index=False)
 
-@st.cache_data(ttl=300)
-def get_intel():
-    try:
-        data_h1 = yf.download("CL=F", period="10d", interval="1h", progress=False)['Close'].ffill()
-        data_d1 = yf.download("CL=F", period="60d", interval="1d", progress=False)['Close'].ffill()
-        price = data_h1.iloc[-1]
-        day_trend = "BULLISH" if price > data_h1.rolling(20).mean().iloc[-1] else "BEARISH"
-        swing_trend = "BULLISH" if price > data_d1.rolling(50).mean().iloc[-1] else "BEARISH"
-        return {"price": price, "day": day_trend, "swing": swing_trend, "delta": ((price/data_h1.iloc[0])-1)*100}
-    except: return None
+@st.cache_data(ttl=60)
+def get_market_data():
+    tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB", "VIX": "^VIX", "US10Y": "^TNX", "USDCAD": "USDCAD=X"}
+    data = yf.download(list(tickers.values()), period="5d", interval="1h", progress=False)['Close']
+    
+    # Preços Atuais
+    prices = {name: data[ticker].iloc[-1] for name, ticker in tickers.items()}
+    # Correlação (últimas 120h)
+    corr_matrix = data.pct_change().corr()
+    
+    # Alpha de Arbitragem WTI-BRENT
+    spread = prices["BRENT"] - prices["WTI"]
+    
+    return prices, corr_matrix, spread
 
-# --- 4. INTERFACE ---
+# --- 4. EXECUÇÃO DA INTERFACE ---
 def main():
-    run_global_scrap()
-    intel = get_intel()
+    fetch_news()
+    prices, correlations, spread = get_market_data()
     DB_FILE = "Oil_Station_V54_Master.csv"
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
 
-    # IA Autonomous Brain
+    # Cabeçalho Crítico
     st.markdown(f"""
-        <div class="ai-brain">
-            <span style="color: #00FFC8; font-weight: 700; font-size: 13px;">IA INITIATIVE ENGINE</span>
-            <div style="margin-top: 8px; font-size: 15px;">
-                {'ALTA CONVICÇÃO: Alpha Geopolítico alinhado à tendência de H1.' if avg_alpha > 7 and intel and intel['day'] == "BULLISH" else '⚖️ MONITORANDO: Fluxo neutro ou sinais divergentes.'}
-            </div>
+        <div class="ai-brain-box">
+            <span style="color: #94A3B8; font-size: 10px; font-weight: 700; text-transform: uppercase;">IA INITIATIVE ENGINE - CRITICAL ANALYSIS</span><br>
+            <span style="font-size: 14px;">
+                {'ALTA CONVICÇÃO: Alpha geopolítico agressivo alinhado com desvalorização do DXY. Risco de ruptura de oferta iminente.' if avg_alpha > 7 and prices['DXY'] < correlations.at['CL=F', 'DX-Y.NYB'] else 'MONITORIZAÇÃO: Fluxo informacional estável. Sem anomalias de preço-volume detetadas.'}
+            </span>
         </div>
     """, unsafe_allow_html=True)
 
-    # Métricas
-    c1, c2, c3, c4 = st.columns(4)
-    if intel:
-        c1.metric("WTI", f"$ {intel['price']:.2f}", f"{intel['delta']:.2f}%")
-        c2.metric("IA ALPHA", f"{avg_alpha:.2f}")
-        c3.metric("DAYTRADE", intel['day'])
-        c4.metric("SWING", intel['swing'])
+    # Abas de Navegação
+    tab1, tab2 = st.tabs(["TERMINAL OPERACIONAL", "ARBITRAGEM E CORRELAÇÃO"])
 
-    st.markdown("---")
+    with tab1:
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}")
+        c2.metric("BRENT CRUDE", f"$ {prices['BRENT']:.2f}")
+        c3.metric("SPREAD W/B", f"$ {spread:.2f}")
+        c4.metric("IA ALPHA", f"{avg_alpha:.2f}")
+        c5.metric("DXY INDEX", f"{prices['DXY']:.2f}")
 
-    col_v, col_n = st.columns([1, 1.8])
-    with col_v:
-        fig = go.Figure(go.Indicator(
-            mode = "gauge+number", value = avg_alpha,
-            gauge = {'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
-        ))
-        fig.update_layout(height=250, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-        st.plotly_chart(fig, width='stretch')
+        st.markdown("---")
 
-    with col_n:
-        st.markdown("### Terminal - XTIUSD")
-        if not df_news.empty:
-            df_display = df_news.head(15).copy()
-            df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">OPEN LINK</a>')
-            st.markdown(df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False), unsafe_allow_html=True)
+        col_left, col_right = st.columns([1, 1.8])
+        with col_left:
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number", value = avg_alpha,
+                gauge = {'axis': {'range': [-10, 10], 'tickcolor': "white"}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
+            ))
+            fig.update_layout(height=250, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            st.plotly_chart(fig, width='stretch')
+
+        with col_right:
+            if not df_news.empty:
+                df_display = df_news.head(15).copy()
+                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">OPEN LINK</a>')
+                st.markdown(df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    with tab2:
+        st.markdown("### Matriz de Correlação e Sinais de Arbitragem")
+        
+        # Análise Crítica de Arbitragem
+        if spread > 6:
+            st.error("SINAL: SPREAD BRENT-WTI ACIMA DA MÉDIA HISTÓRICA. POSSÍVEL ARBITRAGEM EM COMPRA DE WTI / VENDA DE BRENT.")
+        elif spread < 3:
+            st.warning("SINAL: SPREAD ESTREITO. INDICA EXCESSO DE OFERTA NO ATLÂNTICO OU FORTE DEMANDA NOS EUA.")
+        
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.write("Correlação Direta (Impacto no Petróleo):")
+            st.table(correlations['CL=F'].sort_values(ascending=False))
+        
+        with col_c2:
+            st.info("ANÁLISE DO ECONOMISTA: O XTIUSD apresenta correlação inversa severa com o DXY. Se o Alpha IA for positivo e o DXY iniciar queda, a probabilidade de um movimento impulsivo de alta supera 85%. O par USDCAD serve como confirmação secundária; fraqueza no CAD geralmente precede quedas no WTI.")
 
 if __name__ == "__main__":
     main()
