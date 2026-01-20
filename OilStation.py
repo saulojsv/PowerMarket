@@ -109,7 +109,7 @@ def main():
         
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.title("🛢️ QUANT STATION V19")
+            st.title("OIL STATION")
             st.write(f"Monitorando {len(RSS_SOURCES)} fontes com sensibilidade singular.")
         with c2:
             net_alpha = df['Alpha'].sum()
@@ -117,7 +117,7 @@ def main():
             st.metric("BIAS GLOBAL", f"{prob:.1f}%", f"{net_alpha:.2f} α")
 
         # HEATMAP SÓ CATEGORIAS (Como solicitado)
-        st.subheader("📊 Share de Narrativas (Por Categoria)")
+        st.subheader("Share de Narrativas (Por Categoria)")
         cat_counts = df['Categoria'].value_counts(normalize=True).reset_index()
         cat_counts.columns = ['Categoria', 'Share']
         cat_counts['Percentual'] = (cat_counts['Share'] * 100).round(1).astype(str) + '%'
@@ -128,9 +128,10 @@ def main():
         fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "#FFFFFF", 'size': 16})
         st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("📝 Fluxo de Inteligência")
+        st.subheader("Fluxo de Inteligência")
         st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Categoria', 'Termo', 'Sentimento']].head(25), use_container_width=True)
     else:
         st.info("Conectando aos terminais...")
 
 if __name__ == "__main__": main()
+
