@@ -106,10 +106,10 @@ def main():
         st.session_state['monitor'] = True
 
     with st.sidebar:
-        st.header("📡 TERMINAIS ONLINE")
+        st.header("TERMINAIS ONLINE")
         for s in RSS_SOURCES.keys(): st.markdown(f"• {s}: <span class='status-on'>ATIVO</span>", unsafe_allow_html=True)
         st.divider()
-        st.markdown("### 🧠 TERMOS APRENDIDOS (RIGOROSOS)")
+        st.markdown("### TERMOS APRENDIDOS PÓS-REVISÃO")
         if os.path.exists(DB_FILE):
             df_sidebar = pd.read_csv(DB_FILE)
             novos = df_sidebar[df_sidebar['Tipo'] == 'Novo']['Manchete'].unique()
@@ -124,7 +124,7 @@ def main():
         
         c1, c2 = st.columns([2, 1])
         with c1:
-            st.title(TERMINAL - XTIUSD")
+            st.title("TERMINAL - XTIUSD")
             st.write(f"Sincronizado: {datetime.now().strftime('%H:%M:%S')} (Auto-refresh 60s)")
         with c2:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=prob_global, number={'suffix': "%"}, gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#64FFDA"}}))
@@ -145,3 +145,4 @@ def main():
         st.info("Conectando terminais... Aguarde 60 segundos.")
 
 if __name__ == "__main__": main()
+
