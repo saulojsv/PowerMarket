@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v66_refresh")
+st_autorefresh(interval=60000, key="v67_refresh")
 
 st.markdown("""
     <style>
@@ -138,22 +138,23 @@ def fetch_filtered_news():
 @st.cache_data(ttl=60)
 def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
-    default_vals = {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}
+    prices = {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}
+    wti_momentum = 0.0
     try:
-        data = yf.download(list(tickers.values()), period="2d", interval="15m", progress=False)
-        if data.empty or 'Close' not in data:
-            return default_vals, 0.0
-        
-        closes = data['Close'].ffill()
-        prices = {k: closes[v].iloc[-1] for k, v in tickers.items() if v in closes}
-        
-        # Correção do Future Warning do Pandas para 2026
-        wti_series = closes['CL=F']
-        wti_momentum = wti_series.pct_change(fill_method=None).iloc[-1] if not wti_series.empty else 0.0
-        
-        return prices, wti_momentum
-    except Exception as e:
-        return default_vals, 0.0
+        # Download direto ignorando cache SQLite para evitar OperationalError
+        data = yf.download(list(tickers.values()), period="2d", interval="15m", progress=False, ignore_tz=True)
+        if not data.empty and 'Close' in data:
+            closes = data['Close'].ffill()
+            for k, v in tickers.items():
+                if v in closes.columns:
+                    prices[k] = float(closes[v].iloc[-1])
+            
+            if "CL=F" in closes.columns:
+                wti_series = closes["CL=F"]
+                wti_momentum = float(wti_series.pct_change(fill_method=None).iloc[-1]) if len(wti_series) > 1 else 0.0
+    except:
+        pass # Falha silenciosa para manter o terminal ativo
+    return prices, wti_momentum
 
 # --- 4. RENDERIZAÇÃO ---
 def main():
@@ -180,11 +181,11 @@ def main():
     """, unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("WTI CRUDE", f"$ {prices.get('WTI', 0):.2f}", f"{momentum:.2%}")
-    spread = prices.get('BRENT', 0) - prices.get('WTI', 0)
+    c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}", f"{momentum:.2%}")
+    spread = prices['BRENT'] - prices['WTI']
     c2.metric("SPREAD B/W", f"$ {spread:.2f}")
     c3.metric("IA ALPHA SCORE", f"{avg_alpha:.2f}")
-    c4.metric("DXY INDEX", f"$ {prices.get('DXY', 0):.2f}")
+    c4.metric("DXY INDEX", f"{prices['DXY']:.2f}")
 
     st.markdown("---")
     
@@ -197,7 +198,7 @@ def main():
             gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_color}}
         ))
         fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=50, b=20))
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
 
     with col_table:
         if not df_news.empty:
