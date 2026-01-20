@@ -4,4 +4,6 @@ openpyxl
 streamlit
 streamlit-autorefresh
 plotly
+
 numpy
+yfinance
