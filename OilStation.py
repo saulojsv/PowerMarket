@@ -11,11 +11,11 @@ import numpy as np
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E SINCRONISMO ---
-DB_FILE = "Oil_Station_V39_Master.csv"
-st_autorefresh(interval=60000, key="v39_refresh")
+# --- 1. CONFIGURAÇÕES ---
+DB_FILE = "Oil_Station_V40_Master.csv"
+st_autorefresh(interval=60000, key="v40_refresh")
 
-# --- 2. TERMINAIS RSS (SEUS 6 SITES) ---
+# --- 2. TERMINAIS RSS (SITES) ---
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -25,7 +25,7 @@ RSS_SOURCES = {
     "gCaptain": "https://gcaptain.com/feed/"
 }
 
-# --- 3. SEUS 22 DADOS LEXICON (O CÉREBRO) ---
+# --- 3. SEUS 22 LEXICONS (CÉREBRO) ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
@@ -52,29 +52,21 @@ LEXICON_TOPICS = {
 }
 
 # --- 4. MOTOR DE HONESTIDADE CONTEXTUAL ---
-CONTEXT_RULES = {
-    "BULLISH_MOD": ["cut", "surge", "attack", "shortage", "sanction", "emergency", "immediate"],
-    "BEARISH_MOD": ["increase", "plunge", "surplus", "recession", "peace", "easing", "glut"]
-}
+CONTEXT_RULES = {"BULL": ["cut", "surge", "war", "sanction"], "BEAR": ["increase", "plunge", "peace", "glut"]}
 
-def calculate_honest_bias(title, base_alpha):
+def analyze_honest_bias(title, base_alpha):
     t_lower = title.lower()
     score = base_alpha
-    # Ajuste de contexto real
-    for w in CONTEXT_RULES["BULLISH_MOD"]:
+    for w in CONTEXT_RULES["BULL"]:
         if w in t_lower: score += 1.5
-    for w in CONTEXT_RULES["BEARISH_MOD"]:
+    for w in CONTEXT_RULES["BEAR"]:
         if w in t_lower: score -= 1.5
-    
-    # Penalidade por incerteza (honestidade)
-    if any(x in t_lower for x in ["may", "could", "potential", "rumor"]):
-        score = score * 0.6
-        
+    if any(x in t_lower for x in ["may", "could", "potential"]): score *= 0.6
     prob = 1 / (1 + np.exp(-0.35 * abs(score)))
     side = "COMPRA" if score > 0 else "VENDA"
     return f"{np.clip(prob, 0.51, 0.97)*100:.1f}% {side}", score
 
-# --- 5. MONITOR DE NOTÍCIAS INTEGRADO ---
+# --- 5. MONITOR DE NOTÍCIAS (CORRIGIDO) ---
 def news_monitor():
     while True:
         for source, url in RSS_SOURCES.items():
@@ -83,25 +75,23 @@ def news_monitor():
                 for entry in feed.entries[:10]:
                     t_lower = entry.title.lower()
                     found = False
-                    # Busca nos 22 Lexicons
                     for pat, par in LEXICON_TOPICS.items():
                         if re.search(pat, t_lower):
-                            sent, f_alpha = calculate_honest_bias(entry.title, par[0] * par[1])
-                            data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Cat": par[2], "Link": entry.link, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Lexicon"}
+                            sent, f_alpha = analyze_honest_bias(entry.title, par[0] * par[1])
+                            data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Cat": par[2], "Link": entry.link, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Lexicon", "Termo": re.search(pat, t_lower).group()}
                             pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
                             found = True
-                    # Aprendizado Contextual de Novos Termos
-                    if not found and any(x in t_lower for x in ["surge", "plunge", "spike", "drop"]):
+                    if not found and any(x in t_lower for x in ["surge", "plunge", "spike"]):
                         words = re.findall(r'\b[a-zA-Z]{7,}\b', t_lower)
                         for nw in words:
-                            sent, f_alpha = calculate_honest_bias(entry.title, 0)
+                            sent, f_alpha = analyze_honest_bias(entry.title, 0)
                             if abs(f_alpha) > 1.0:
-                                data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Cat": f"Validação: {nw}", "Link": entry.link, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Novo"}
+                                data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Cat": f"Validação: {nw}", "Link": entry.link, "Alpha": f_alpha, "TS": datetime.now().isoformat(), "Tipo": "Novo", "Termo": nw}
                                 pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
-# --- 6. INTERFACE UI (OTIMIZADA PARA FOTO) ---
+# --- 6. UI PRINCIPAL ---
 def main():
     st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide")
     st.markdown("""<style>
@@ -126,33 +116,36 @@ def main():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('TS', ascending=False)
         
-        # Consolidação Automática (Lógica de 6 termos)
+        # --- PREVENÇÃO DE KEYERROR ---
+        if 'Termo' not in df.columns: df['Termo'] = "N/A"
+        if 'Tipo' not in df.columns: df['Tipo'] = "Lexicon"
+
         for cat_label in ["NARRATIVA BULLISH", "NARRATIVA BEARISH"]:
             target = "COMPRA" if "BULLISH" in cat_label else "VENDA"
-            termos_novos = df[(df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target))]['Termo'].unique()
-            if len(termos_novos) >= 6:
-                df.loc[(df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target)), 'Cat'] = cat_label
+            if not df.empty:
+                # Lógica protegida contra colunas inexistentes
+                mask = (df['Tipo'] == 'Novo') & (df['Sent'].str.contains(target, na=False))
+                termos_novos = df[mask]['Termo'].unique()
+                if len(termos_novos) >= 6:
+                    df.loc[mask, 'Cat'] = cat_label
 
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.title("TERMINAL - OIL")
+            st.title(" MONITORIZAR XTIUSD")
             search = st.text_input("FILTRAR FLUXO", "")
         with c2:
-            avg_a = df['Alpha'].mean()
-            prob = 100 / (1 + np.exp(-0.15 * (avg_a or 0)))
+            avg_a = df['Alpha'].mean() if 'Alpha' in df.columns else 0
+            prob = 100 / (1 + np.exp(-0.15 * avg_a))
             st.metric("FORÇA DO FLUXO", f"{prob:.1f}%")
 
         tab_fluxo, tab_heat = st.tabs(["FLUXO COM LINKS", "HEATMAP"])
         with tab_fluxo:
-            if search: df = df[df['Manchete'].str.contains(search, case=False)]
-            st.dataframe(
-                df[['Hora', 'Fonte', 'Manchete', 'Sent', 'Cat', 'Link']].head(60),
-                column_config={"Link": st.column_config.LinkColumn("Fonte", display_text="Link")},
-                width='stretch'
-            )
+            if search: df = df[df['Manchete'].str.contains(search, case=False, na=False)]
+            cols = [c for c in ['Hora', 'Fonte', 'Manchete', 'Sent', 'Cat', 'Link'] if c in df.columns]
+            st.dataframe(df[cols].head(60), column_config={"Link": st.column_config.LinkColumn("Link")}, width='stretch')
         with tab_heat:
-            cat_df = df['Cat'].value_counts(normalize=True).reset_index()
-            fig_tree = px.treemap(cat_df, path=['Cat'], values='proportion', color_discrete_sequence=['#0D1B2A', '#64FFDA'])
-            st.plotly_chart(fig_tree, width='stretch')
+            if not df.empty:
+                cat_df = df['Cat'].value_counts(normalize=True).reset_index()
+                st.plotly_chart(px.treemap(cat_df, path=['Cat'], values='proportion', color_discrete_sequence=['#0D1B2A', '#64FFDA']), width='stretch')
 
 if __name__ == "__main__": main()
