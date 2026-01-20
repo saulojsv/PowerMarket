@@ -3,41 +3,35 @@ import re
 import feedparser
 import time
 import os
-import threading
 import streamlit as st
-import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import yfinance as yf
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÃO DE AMBIENTE ---
-st.set_page_config(page_title="V54 QUANT SIMULATOR PRO", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v54_refresh_sim")
+# --- 1. CONFIGURAÇÃO DE AMBIENTE E ESTILO ---
+st.set_page_config(page_title="QUANT STATION V54 | PRO", layout="wide", initial_sidebar_state="collapsed")
+st_autorefresh(interval=60000, key="v54_refresh")
 
-# Arquivos de Dados
 DB_FILE = "Oil_Station_V54_Master.csv"
-TRADE_LOG_FILE = "Simulation_Log_V54.csv"
+TRADE_LOG_FILE = "Trade_Simulation_V54.csv"
 
-# Inicialização de Cache
-if 'last_oil_price' not in st.session_state:
-    st.session_state.last_oil_price = 0.0
-
-# --- ESTILO ORIGINAL SOLICITADO ---
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         .stApp { background-color: #02060C; color: #E0E0E0; font-family: 'JetBrains Mono', monospace; }
-        .trade-row { background: #0B121D; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 4px solid #39FF14; }
-        .pnl-positive { color: #39FF14; font-weight: bold; }
-        .pnl-negative { color: #FF4B4B; font-weight: bold; }
-        .macro-tag { background: #1B2B48; color: #8a96a3; padding: 2px 6px; border-radius: 3px; font-size: 10px; }
-        [data-testid="stMetricValue"] { color: #39FF14 !important; }
+        [data-testid="stMetricValue"] { font-size: 20px !important; color: #39FF14 !important; }
+        div[data-testid="stMetric"] { background-color: #0B121D; border-left: 4px solid #39FF14; padding: 10px; border-radius: 4px; }
+        .pnl-pos { color: #39FF14; font-weight: bold; }
+        .pnl-neg { color: #FF4B4B; font-weight: bold; }
+        .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+        .stTabs [data-baseweb="tab"] { background-color: #0B121D; border-radius: 4px; color: #8a96a3; }
+        .stTabs [aria-selected="true"] { border-bottom-color: #39FF14 !important; color: #39FF14 !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CONFIGURAÇÕES MASTER (FONTES & 22 LEXICONS) ---
+# --- 2. OS 10 SITES (FONTES RSS/XML) ---
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Reuters Energy": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -51,6 +45,7 @@ RSS_SOURCES = {
     "Rigzone": "https://www.rigzone.com/news/rss/rigzone_latest.xml"
 }
 
+# --- 3. OS 22 LEXICONS (EIXOS MACRO) ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation|invasion": [9.8, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade|nuclear": [9.0, 1, "Geopolítica (Sanções)"],
@@ -76,89 +71,71 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Fluxo Quant"]
 }
 
-# --- 3. MOTOR DE DADOS ---
-
-def get_live_market():
+# --- 4. MOTOR DE DADOS E SIMULAÇÃO ---
+def get_market_intel():
     try:
-        data = yf.download(["CL=F", "USDCAD=X"], period="1d", interval="5m", progress=False)
-        oil = data['Close']['CL=F'].iloc[-1]
-        cad_open = data['Open']['USDCAD=X'].iloc[0]
-        cad_now = data['Close']['USDCAD=X'].iloc[-1]
-        cad_delta = ((cad_now / cad_open) - 1) * 100
-        st.session_state.last_oil_price = oil
-        return oil, cad_delta
-    except:
-        return st.session_state.last_oil_price, 0.0
+        tickers = ["CL=F", "DX-Y.NYB", "USDCAD=X", "GC=F"]
+        data = yf.download(tickers, period="2d", interval="15m", progress=False)['Close']
+        last = data.iloc[-1]
+        delta = ((last / data.iloc[0]) - 1) * 100
+        return last, delta, data.corr()
+    except: return None, None, None
 
-def execute_simulated_trade(side, entry_price, reason):
-    new_entry = pd.DataFrame([{
-        "Data_Hora": datetime.now().strftime("%d/%m %H:%M:%S"),
-        "Lote": 1.0,
-        "Tipo": side,
-        "Entrada": entry_price,
-        "Macro_Context": reason,
-        "Status": "ACTIVE",
-        "TS": datetime.now().timestamp()
-    }])
+def log_trade(side, price, reason):
+    new_t = pd.DataFrame([{"Hora": datetime.now().strftime("%H:%M:%S"), "Lote": 1.0, 
+                           "Tipo": side, "Entrada": price, "Contexto": reason, "TS": datetime.now().timestamp()}])
     if os.path.exists(TRADE_LOG_FILE):
         log = pd.read_csv(TRADE_LOG_FILE)
-        if (datetime.now().timestamp() - log['TS'].iloc[-1]) > 900: # Proteção 15 min
-            pd.concat([log, new_entry], ignore_index=True).to_csv(TRADE_LOG_FILE, index=False)
-    else:
-        new_entry.to_csv(TRADE_LOG_FILE, index=False)
+        if (datetime.now().timestamp() - log['TS'].iloc[-1]) > 900:
+            pd.concat([log, new_t], ignore_index=True).to_csv(TRADE_LOG_FILE, index=False)
+    else: new_t.to_csv(TRADE_LOG_FILE, index=False)
 
-# --- 4. INTERFACE PRINCIPAL ---
-
+# --- 5. INTERFACE ---
 def main():
-    oil_price, cad_delta = get_live_market()
+    prices, deltas, corr_matrix = get_market_intel()
     
-    st.title("🛡️ QUANT SIMULATOR & MACRO ANALYSIS")
+    st.title("TERMINAL XTI")
     
-    tab_sim, tab_news, tab_lex = st.tabs(["🏦 SIMULATED PORTFOLIO", "📊 SENTIMENT FLOW", "🧠 22 LEXICONS"])
+    if prices is not None:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("WTI OIL", f"${prices['CL=F']:.2f}", f"{deltas['CL=F']:.2f}%")
+        c2.metric("DXY", f"{prices['DX-Y.NYB']:.2f}", f"{deltas['DX-Y.NYB']:.2f}%", delta_color="inverse")
+        c3.metric("USDCAD", f"{prices['USDCAD=X']:.4f}", f"{deltas['USDCAD=X']:.2f}%", delta_color="inverse")
+        c4.metric("GOLD", f"${prices['GC=F']:.1f}", f"{deltas['GC=F']:.2f}%")
+
+    tab_news, tab_corr, tab_pnl = st.tabs(["📊 NEWS FLOW", "🔗 CORRELATIONS", "🏦 TRADING PNL"])
 
     with tab_news:
         if os.path.exists(DB_FILE):
-            df_news = pd.read_csv(DB_FILE).sort_values('TS', ascending=False)
-            avg_a = df_news.head(10)['Alpha'].mean()
-            
-            # Lógica de Decisão (Tese: Sentimento + Validação Câmbio)
-            if avg_a > 1.5 and cad_delta < -0.05:
-                execute_simulated_trade("BUY", oil_price, "Alpha Bullish + CAD Confirmation")
-            elif avg_a < -1.5 and cad_delta > 0.05:
-                execute_simulated_trade("SELL", oil_price, "Alpha Bearish + CAD Confirmation")
-            
-            st.dataframe(df_news[['Data', 'Fonte', 'Manchete', 'Alpha', 'Cat']].head(50), width='stretch', hide_index=True)
+            df = pd.read_csv(DB_FILE).sort_values('TS', ascending=False)
+            st.dataframe(df[['Data', 'Fonte', 'Manchete', 'Alpha', 'Cat']].head(50), use_container_width=True, hide_index=True)
+            avg_a = df.head(10)['Alpha'].mean()
+        else: avg_a = 0
 
-    with tab_sim:
+    with tab_corr:
+        st.subheader("Intermarket Correlation Matrix (WTI base)")
+        if corr_matrix is not None:
+            oil_c = corr_matrix[['CL=F']].sort_values(by='CL=F', ascending=False)
+            st.table(oil_c.style.background_gradient(cmap='RdYlGn'))
+        
+        
+
+    with tab_pnl:
+        if prices is not None:
+            # Lógica de Estratégia Cross-Asset
+            if avg_a > 1.5 and deltas['USDCAD=X'] < -0.01 and deltas['DX-Y.NYB'] < 0:
+                log_trade("BUY", prices['CL=F'], "Alpha + CAD Strong + DXY Weak")
+            elif avg_a < -1.5 and deltas['USDCAD=X'] > 0.01 and deltas['DX-Y.NYB'] > 0:
+                log_trade("SELL", prices['CL=F'], "Alpha + CAD Weak + DXY Strong")
+
         if os.path.exists(TRADE_LOG_FILE):
             trades = pd.read_csv(TRADE_LOG_FILE).sort_values('TS', ascending=False)
-            trades['PnL_Points'] = trades.apply(lambda r: oil_price - r['Entrada'] if r['Tipo']=="BUY" else r['Entrada'] - oil_price, axis=1)
+            trades['Preço_Atual'] = prices['CL=F']
+            trades['PnL_Points'] = trades.apply(lambda r: prices['CL=F'] - r['Entrada'] if r['Tipo']=="BUY" else r['Entrada'] - prices['CL=F'], axis=1)
             trades['PnL_USD'] = trades['PnL_Points'] * 1000
-
-            c1, c2, c3 = st.columns(3)
-            total_pts = trades['PnL_Points'].sum()
-            c1.metric("POSIÇÕES SIMULADAS", len(trades))
-            c2.metric("ALPHA ACUMULADO", f"{total_pts:+.2f} pts")
-            c3.metric("PNL ESTIMADO (1 LOTE)", f"${total_pts * 1000:,.2f}")
-
-            st.markdown("### 📝 Journal de Execução")
-            for _, row in trades.iterrows():
-                pnl_color = "pnl-positive" if row['PnL_Points'] >= 0 else "pnl-negative"
-                st.markdown(f"""
-                    <div class="trade-row">
-                        <span style="font-size:12px; color:#8a96a3;">{row['Data_Hora']}</span> | 
-                        <b style="color:{'#39FF14' if row['Tipo']=='BUY' else '#FF4B4B'}">{row['Tipo']}</b> | 
-                        Entrada: <b>${row['Entrada']:.2f}</b> | 
-                        PnL: <span class="{pnl_color}">{row['PnL_Points']:+.2f} pts (${row['PnL_USD']:,.2f})</span><br>
-                        <span class="macro-tag">MOTIVO: {row['Macro_Context']}</span>
-                    </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("Aguardando confluência macro para abrir posições.")
-
-    with tab_lex:
-        st.write("Configuração dos 22 Eixos de Análise:")
-        lex_df = pd.DataFrame([{"Regex": k, "Força": v[0], "Bias": v[1], "Categoria": v[2]} for k,v in LEXICON_TOPICS.items()])
-        st.dataframe(lex_df, width='stretch')
+            
+            st.table(trades[['Hora', 'Tipo', 'Lote', 'Entrada', 'Preço_Atual', 'PnL_Points', 'PnL_USD', 'Contexto']])
+            st.metric("TOTAL PNL", f"${trades['PnL_USD'].sum():,.2f}")
+        else: st.info("Aguardando confluência macro para entrar.")
 
 if __name__ == "__main__": main()
