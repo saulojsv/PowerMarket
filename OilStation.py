@@ -9,9 +9,9 @@ import numpy as np
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E ESTÉTICA DE TERMINAL BLOOMBERG ---
+# --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v56_refresh")
+st_autorefresh(interval=60000, key="v57_refresh")
 
 st.markdown("""
     <style>
@@ -34,7 +34,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. BASE DE DADOS COMPLETA (20 SITES / 22 LEXICONS) ---
+# --- 2. BASE DE DADOS (20 SITES / 22 LEXICONS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -108,14 +108,22 @@ def fetch_news():
 @st.cache_data(ttl=60)
 def get_market_data():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB", "VIX": "^VIX", "US10Y": "^TNX"}
+    prices = {k: np.nan for k in tickers.keys()}
+    corr_matrix = pd.DataFrame()
+    
     try:
-        data = yf.download(list(tickers.values()), period="5d", interval="1h", progress=False)['Close']
-        data = data.ffill().bfill()
-        prices = {name: data[ticker].iloc[-1] for name, ticker in tickers.items()}
-        corr = data.pct_change(fill_method=None).corr()
-        return prices, corr
-    except:
-        return {k: 0.0 for k in tickers.keys()}, pd.DataFrame()
+        # Download em lote com tratamento de erro
+        data = yf.download(list(tickers.values()), period="5d", interval="1h", progress=False)
+        if not data.empty:
+            closes = data['Close'].ffill().bfill()
+            for name, ticker in tickers.items():
+                if ticker in closes.columns:
+                    prices[name] = closes[ticker].iloc[-1]
+            corr_matrix = closes.pct_change(fill_method=None).corr()
+    except Exception:
+        pass # Mantém como nan se houver rate limit
+        
+    return prices, corr_matrix
 
 # --- 4. RENDERIZAÇÃO ---
 def main():
@@ -129,7 +137,7 @@ def main():
         <div class="ai-brain-box">
             <span style="color: #94A3B8; font-size: 10px; font-weight: 700; text-transform: uppercase;">SISTEMA AUTÔNOMO DE ANÁLISE QUANTITATIVA</span><br>
             <span style="font-size: 14px;">
-                {'ALTA CONVICÇÃO: Confluência entre prêmio de risco geopolítico e fraqueza do DXY detectada.' if avg_alpha > 5 and prices['DXY'] < 104 else 'ANALISANDO: Ruído de mercado elevado. Aguardando confirmação de fluxo em Chokepoints.'}
+                {'ALTA CONVICÇÃO: Alpha detectado acima do limiar de segurança.' if avg_alpha > 5 else 'MONITORANDO: Fluxo neutro ou sinais divergentes no terminal.'}
             </span>
         </div>
     """, unsafe_allow_html=True)
@@ -138,32 +146,24 @@ def main():
 
     with tab1:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}")
+        c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}" if not np.isnan(prices['WTI']) else "nan")
         c2.metric("ALPHA SENTIMENT", f"{avg_alpha:.2f}")
-        c3.metric("DXY INDEX", f"{prices['DXY']:.2f}")
-        c4.metric("VOLATILIDADE VIX", f"{prices['VIX']:.2f}")
+        c3.metric("DXY INDEX", f"{prices['DXY']:.2f}" if not np.isnan(prices['DXY']) else "nan")
+        c4.metric("VOLATILIDADE VIX", f"{prices['VIX']:.2f}" if not np.isnan(prices['VIX']) else "nan")
 
         st.markdown("---")
         
-        col_gauges, col_table = st.columns([1.2, 1.8])
+        col_gauge, col_table = st.columns([1, 2])
         
-        with col_gauges:
-            # Gauge Alpha
-            fig1 = go.Figure(go.Indicator(
+        with col_gauge:
+            # Único Velocímetro: Alpha Sentiment
+            fig = go.Figure(go.Indicator(
                 mode="gauge+number", value=avg_alpha, title={'text': "SENTIMENTO (ALPHA)", 'font': {'size': 14}},
                 gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
             ))
-            fig1.update_layout(height=200, margin=dict(t=30, b=10, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig1, use_container_width=True)
-
-            # Gauge Pressão Cambial
-            mkt_val = (105 - prices['DXY']) * 2
-            fig2 = go.Figure(go.Indicator(
-                mode="gauge+number", value=mkt_val, title={'text': "PRESSÃO DXY (INVERSA)", 'font': {'size': 14}},
-                gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if mkt_val > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
-            ))
-            fig2.update_layout(height=200, margin=dict(t=30, b=10, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig2, use_container_width=True)
+            fig.update_layout(height=350, margin=dict(t=50, b=10, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            # Correção erro 2026: width='stretch'
+            st.plotly_chart(fig, width='stretch')
 
         with col_table:
             if not df_news.empty:
@@ -176,15 +176,15 @@ def main():
             st.markdown("### Matriz de Cointegração (WTI vs Ativos Globais)")
             st.table(correlations['CL=F'].sort_values(ascending=False))
         else:
-            st.warning("Servidor de dados sob carga. Recarregando matriz...")
+            st.warning("Servidor de dados sob carga ou Rate Limit ativo no Yahoo Finance.")
 
     with tab3:
         st.markdown("### Parecer Técnico Estrutural")
         st.info(f"""
         ANÁLISE DE RISCO XTIUSD:
-        1. DINÂMICA DE JUROS: Com o US10Y em {prices['US10Y']:.2f}, o mercado testa a resiliência da demanda industrial. Yields em ascensão são o maior risco deflacionário para o barril.
-        2. VIES DE ALPHA: O score de {avg_alpha:.2f} indica que o mercado já precificou parte das tensões. O risco agora reside em uma 'desescalada' súbita.
-        3. CORRELAÇÃO DXY: A força do dólar ({prices['DXY']:.2f}) permanece como o pivô central. Qualquer movimento abaixo de 103.50 abrirá espaço para teste de resistências no WTI.
+        1. VOLATILIDADE: O VIX encontra-se em estado '{prices['VIX'] if not np.isnan(prices['VIX']) else 'DESCONHECIDO (Rate Limit)'}'.
+        2. VIES DE ALPHA: O score de {avg_alpha:.2f} é o driver principal na ausência de dados macro síncronos.
+        3. CORRELAÇÃO DXY: O dólar permanece como o pivô central da liquidez.
         """)
 
 if __name__ == "__main__":
