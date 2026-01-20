@@ -163,7 +163,7 @@ def main():
 
     c_head1, c_head2 = st.columns([3, 1])
     with c_head1: 
-        st.markdown("# TERMINAL DE ANÁLISE <span style='color:white'>V54 GOLD</span>", unsafe_allow_html=True)
+        st.markdown("# TERMINAL - XTIUSD | OS BIGODINS", unsafe_allow_html=True)
     with c_head2: 
         st.markdown(f"""
             <div style="text-align:right; font-family:monospace; font-size:14px; margin-top:10px;">
@@ -228,3 +228,4 @@ def main():
                              width='stretch', hide_index=True)
 
 if __name__ == "__main__": main()
+
