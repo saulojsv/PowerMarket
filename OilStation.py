@@ -9,9 +9,9 @@ import numpy as np
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E ESTÉTICA PROFISSIONAL ---
+# --- 1. CONFIGURAÇÕES E ESTÉTICA DE TERMINAL BLOOMBERG ---
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v55_refresh")
+st_autorefresh(interval=60000, key="v56_refresh")
 
 st.markdown("""
     <style>
@@ -27,14 +27,14 @@ st.markdown("""
         border: 1px solid rgba(0, 255, 200, 0.2);
         padding: 15px; border-radius: 8px; margin-bottom: 20px;
     }
-    table { width: 100%; border-collapse: collapse; background: transparent !important; }
-    th { color: #94A3B8 !important; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 8px; }
-    td { font-size: 13px; padding: 8px; border-bottom: 1px solid #0D1421; }
+    table { width: 100%; border-collapse: collapse; background: transparent !important; color: #FFFFFF !important; }
+    th { color: #94A3B8 !important; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 8px; text-align: left; }
+    td { font-size: 13px; padding: 8px; border-bottom: 1px solid #0D1421; color: #FFFFFF !important; }
     a { color: #00FFC8 !important; text-decoration: none; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATABASE E LEXICONS ---
+# --- 2. BASE DE DADOS COMPLETA (20 SITES / 22 LEXICONS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -83,7 +83,7 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
 
-# --- 3. MOTOR DE DADOS ---
+# --- 3. MOTOR DE INTELIGÊNCIA ---
 def fetch_news():
     news_data = []
     DB_FILE = "Oil_Station_V54_Master.csv"
@@ -107,81 +107,85 @@ def fetch_news():
 
 @st.cache_data(ttl=60)
 def get_market_data():
-    tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB", "VIX": "^VIX", "US10Y": "^TNX", "USDCAD": "USDCAD=X"}
-    data = yf.download(list(tickers.values()), period="5d", interval="1h", progress=False)['Close']
-    
-    # Preços Atuais
-    prices = {name: data[ticker].iloc[-1] for name, ticker in tickers.items()}
-    # Correlação (últimas 120h)
-    corr_matrix = data.pct_change().corr()
-    
-    # Alpha de Arbitragem WTI-BRENT
-    spread = prices["BRENT"] - prices["WTI"]
-    
-    return prices, corr_matrix, spread
+    tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB", "VIX": "^VIX", "US10Y": "^TNX"}
+    try:
+        data = yf.download(list(tickers.values()), period="5d", interval="1h", progress=False)['Close']
+        data = data.ffill().bfill()
+        prices = {name: data[ticker].iloc[-1] for name, ticker in tickers.items()}
+        corr = data.pct_change(fill_method=None).corr()
+        return prices, corr
+    except:
+        return {k: 0.0 for k in tickers.keys()}, pd.DataFrame()
 
-# --- 4. EXECUÇÃO DA INTERFACE ---
+# --- 4. RENDERIZAÇÃO ---
 def main():
     fetch_news()
-    prices, correlations, spread = get_market_data()
+    prices, correlations = get_market_data()
     DB_FILE = "Oil_Station_V54_Master.csv"
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
 
-    # Cabeçalho Crítico
     st.markdown(f"""
         <div class="ai-brain-box">
-            <span style="color: #94A3B8; font-size: 10px; font-weight: 700; text-transform: uppercase;">IA INITIATIVE ENGINE - CRITICAL ANALYSIS</span><br>
+            <span style="color: #94A3B8; font-size: 10px; font-weight: 700; text-transform: uppercase;">SISTEMA AUTÔNOMO DE ANÁLISE QUANTITATIVA</span><br>
             <span style="font-size: 14px;">
-                {'ALTA CONVICÇÃO: Alpha geopolítico agressivo alinhado com desvalorização do DXY. Risco de ruptura de oferta iminente.' if avg_alpha > 7 and prices['DXY'] < correlations.at['CL=F', 'DX-Y.NYB'] else 'MONITORIZAÇÃO: Fluxo informacional estável. Sem anomalias de preço-volume detetadas.'}
+                {'ALTA CONVICÇÃO: Confluência entre prêmio de risco geopolítico e fraqueza do DXY detectada.' if avg_alpha > 5 and prices['DXY'] < 104 else 'ANALISANDO: Ruído de mercado elevado. Aguardando confirmação de fluxo em Chokepoints.'}
             </span>
         </div>
     """, unsafe_allow_html=True)
 
-    # Abas de Navegação
-    tab1, tab2 = st.tabs(["TERMINAL OPERACIONAL", "ARBITRAGEM E CORRELAÇÃO"])
+    tab1, tab2, tab3 = st.tabs(["TERMINAL OPERACIONAL", "CORRELAÇÕES", "ANÁLISE MACRO SÊNIOR"])
 
     with tab1:
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}")
-        c2.metric("BRENT CRUDE", f"$ {prices['BRENT']:.2f}")
-        c3.metric("SPREAD W/B", f"$ {spread:.2f}")
-        c4.metric("IA ALPHA", f"{avg_alpha:.2f}")
-        c5.metric("DXY INDEX", f"{prices['DXY']:.2f}")
+        c2.metric("ALPHA SENTIMENT", f"{avg_alpha:.2f}")
+        c3.metric("DXY INDEX", f"{prices['DXY']:.2f}")
+        c4.metric("VOLATILIDADE VIX", f"{prices['VIX']:.2f}")
 
         st.markdown("---")
-
-        col_left, col_right = st.columns([1, 1.8])
-        with col_left:
-            fig = go.Figure(go.Indicator(
-                mode = "gauge+number", value = avg_alpha,
-                gauge = {'axis': {'range': [-10, 10], 'tickcolor': "white"}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
+        
+        col_gauges, col_table = st.columns([1.2, 1.8])
+        
+        with col_gauges:
+            # Gauge Alpha
+            fig1 = go.Figure(go.Indicator(
+                mode="gauge+number", value=avg_alpha, title={'text': "SENTIMENTO (ALPHA)", 'font': {'size': 14}},
+                gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
             ))
-            fig.update_layout(height=250, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig, width='stretch')
+            fig1.update_layout(height=200, margin=dict(t=30, b=10, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            st.plotly_chart(fig1, use_container_width=True)
 
-        with col_right:
+            # Gauge Pressão Cambial
+            mkt_val = (105 - prices['DXY']) * 2
+            fig2 = go.Figure(go.Indicator(
+                mode="gauge+number", value=mkt_val, title={'text': "PRESSÃO DXY (INVERSA)", 'font': {'size': 14}},
+                gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if mkt_val > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
+            ))
+            fig2.update_layout(height=200, margin=dict(t=30, b=10, l=30, r=30), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with col_table:
             if not df_news.empty:
                 df_display = df_news.head(15).copy()
-                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">OPEN LINK</a>')
+                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">ACESSAR</a>')
                 st.markdown(df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False), unsafe_allow_html=True)
 
     with tab2:
-        st.markdown("### Matriz de Correlação e Sinais de Arbitragem")
-        
-        # Análise Crítica de Arbitragem
-        if spread > 6:
-            st.error("SINAL: SPREAD BRENT-WTI ACIMA DA MÉDIA HISTÓRICA. POSSÍVEL ARBITRAGEM EM COMPRA DE WTI / VENDA DE BRENT.")
-        elif spread < 3:
-            st.warning("SINAL: SPREAD ESTREITO. INDICA EXCESSO DE OFERTA NO ATLÂNTICO OU FORTE DEMANDA NOS EUA.")
-        
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
-            st.write("Correlação Direta (Impacto no Petróleo):")
+        if not correlations.empty:
+            st.markdown("### Matriz de Cointegração (WTI vs Ativos Globais)")
             st.table(correlations['CL=F'].sort_values(ascending=False))
-        
-        with col_c2:
-            st.info("ANÁLISE DO ECONOMISTA: O XTIUSD apresenta correlação inversa severa com o DXY. Se o Alpha IA for positivo e o DXY iniciar queda, a probabilidade de um movimento impulsivo de alta supera 85%. O par USDCAD serve como confirmação secundária; fraqueza no CAD geralmente precede quedas no WTI.")
+        else:
+            st.warning("Servidor de dados sob carga. Recarregando matriz...")
+
+    with tab3:
+        st.markdown("### Parecer Técnico Estrutural")
+        st.info(f"""
+        ANÁLISE DE RISCO XTIUSD:
+        1. DINÂMICA DE JUROS: Com o US10Y em {prices['US10Y']:.2f}, o mercado testa a resiliência da demanda industrial. Yields em ascensão são o maior risco deflacionário para o barril.
+        2. VIES DE ALPHA: O score de {avg_alpha:.2f} indica que o mercado já precificou parte das tensões. O risco agora reside em uma 'desescalada' súbita.
+        3. CORRELAÇÃO DXY: A força do dólar ({prices['DXY']:.2f}) permanece como o pivô central. Qualquer movimento abaixo de 103.50 abrirá espaço para teste de resistências no WTI.
+        """)
 
 if __name__ == "__main__":
     main()
