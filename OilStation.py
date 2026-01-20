@@ -11,36 +11,31 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTILO ---
-st.set_page_config(page_title="TERMINAL - XTIUSD", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Terminal - XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v54_refresh_pro")
 
-# CSS para deixar o site "muito mais bonito"
 st.markdown("""
     <style>
     .stApp { background-color: #050A12; color: #E0E0E0; }
-    [data-testid="stMetricValue"] { font-size: 28px !important; color: #00FFC8 !important; }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { 
-        background-color: #0D1421; border-radius: 5px; padding: 10px 20px; color: white;
+    .status-bar {
+        padding: 15px; border-radius: 10px; border-left: 5px solid #00FFC8;
+        background: #0D1421; margin-bottom: 25px; font-family: 'Courier New', monospace;
     }
-    .stTabs [aria-selected="true"] { border-bottom: 2px solid #00FFC8 !important; }
+    [data-testid="stMetricValue"] { font-size: 26px !important; color: #00FFC8 !important; }
     div[data-testid="metric-container"] {
         background-color: #0D1421; border: 1px solid #1B263B;
-        padding: 15px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+        padding: 15px; border-radius: 12px; box-shadow: 0px 4px 15px rgba(0,0,0,0.5);
     }
     </style>
 """, unsafe_allow_html=True)
 
 # --- PARÂMETROS ---
 BANCA_INICIAL = 300.00
-MULTIPLICADOR_MICRO = 10.0
-IA_STOP_LOSS = 7.50
-IA_TAKE_PROFIT = 15.00
 DB_FILE = "Oil_Station_V54_Master.csv"
 TRADE_LOG_FILE = "Trade_Simulation_V54.csv"
+SUSPECT_ASSETS = ["CL=F", "BZ=F", "DX-Y.NYB", "USDCAD=X", "^VIX", "^TNX", "AUDJPY=X", "XLE"]
 
-# --- DICIONÁRIOS (22 Lexicons e 20 Fontes) ---
-# [Mantidos conforme suas instruções anteriores para precisão da IA]
+# --- 2. BASE DE CONHECIMENTO (20 FONTES E 22 LEXICONS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -65,15 +60,15 @@ RSS_SOURCES = {
 }
 
 LEXICON_TOPICS = {
-    r"war|attack|missile|drone|strike|conflict|escalation|invasion": [9.8, 1, "Geopolitica (Conflito)"],
-    r"sanction|embargo|ban|price cap|seizure|blockade|nuclear": [9.0, 1, "Geopolitica (Sancoes)"],
+    r"war|attack|missile|drone|strike|conflict|escalation|invasion": [9.8, 1, "Geopolítica (Conflito)"],
+    r"sanction|embargo|ban|price cap|seizure|blockade|nuclear": [9.0, 1, "Geopolítica (Sanções)"],
     r"iran|strait of hormuz|red sea|houthis|bab al-mandab|suez": [9.8, 1, "Risco Chokepoint"],
-    r"israel|gaza|hezbollah|lebanon|tehran|kremlin|ukraine": [9.2, 1, "Tensoes Regionais"],
-    r"opec|saudi|russia|novak|bin salman|cut|quota|output curb": [9.5, 1, "Politica OPEC+"],
+    r"israel|gaza|hezbollah|lebanon|tehran|kremlin|ukraine": [9.2, 1, "Tensões Regionais"],
+    r"opec|saudi|russia|novak|bin salman|cut|quota|output curb": [9.5, 1, "Política OPEC+"],
     r"voluntary cut|unwinding|compliance|production target": [8.5, 1, "Oferta OPEC+"],
     r"shale|fracking|permian|rig count|drilling|bakken|spr": [7.5, -1, "Oferta EUA"],
     r"non-opec|brazil|guyana|canada|output surge": [7.0, -1, "Oferta Extra-OPEC"],
-    r"inventory|stockpile|draw|drawdown|depletion|api|eia": [8.0, 1, "Estoques (Deficit)"],
+    r"inventory|stockpile|draw|drawdown|depletion|api|eia": [8.0, 1, "Estoques (Déficit)"],
     r"build|glut|oversupply|surplus|storage full": [8.0, -1, "Estoques (Excesso)"],
     r"refinery|outage|maintenance|gasoline|distillates": [7.0, 1, "Refino/Margens"],
     r"crack spread|heating oil|jet fuel|diesel demand": [6.5, 1, "Derivados"],
@@ -81,28 +76,15 @@ LEXICON_TOPICS = {
     r"demand surge|recovery|consumption|growth|stimulus": [8.2, 1, "Macro (Demanda Forte)"],
     r"fed|rate hike|hawkish|inflation|cpi|interest rate": [7.5, -1, "Macro (Aperto Fed)"],
     r"dovish|rate cut|powell|liquidity|easing|soft landing": [7.5, 1, "Macro (Estimulo Fed)"],
-    r"dollar|dxy|greenback|fx|yields": [7.0, -1, "Correlacao DXY"],
+    r"dollar|dxy|greenback|fx|yields": [7.0, -1, "Correlação DXY"],
     r"gdp|pmi|manufacturing|industrial production": [6.8, 1, "Indicadores Macro"],
     r"hedge funds|bullish|bearish|short covering|positioning": [6.5, 1, "Fluxo Especulativo"],
-    r"technical break|resistance|support|moving average": [6.0, 1, "Analise Tecnica"],
+    r"technical break|resistance|support|moving average": [6.0, 1, "Análise Técnica"],
     r"volatility|vix|contango|backwardation": [6.2, 1, "Estrutura de Termo"],
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Fluxo Quant"]
 }
 
-SUSPECT_ASSETS = ["CL=F", "BZ=F", "DX-Y.NYB", "USDCAD=X", "^VIX", "^TNX", "AUDJPY=X", "XLE"]
-
-# --- 2. MOTOR DE DADOS ---
-@st.cache_data(ttl=300)
-def get_market_intel():
-    try:
-        data = yf.download(SUSPECT_ASSETS, period="2d", interval="15m", progress=False)['Close']
-        if data.empty: return None
-        prices = data.iloc[-1]
-        deltas = ((data.iloc[-1] / data.iloc[0]) - 1) * 100
-        corr = data.corr()
-        return prices, deltas, corr
-    except: return None
-
+# --- 3. MOTOR DE INTELIGÊNCIA ---
 def run_global_scrap():
     news_data = []
     for name, url in RSS_SOURCES.items():
@@ -115,109 +97,90 @@ def run_global_scrap():
                         score = w * d; cat = c; break
                 news_data.append({"Data": datetime.now().strftime("%H:%M"), "Fonte": name, "Manchete": entry.title[:80], "Alpha": score, "Cat": cat})
         except: continue
-    df_new = pd.DataFrame(news_data)
-    if os.path.exists(DB_FILE):
-        df_old = pd.read_csv(DB_FILE)
-        df_new = pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(100)
-    df_new.to_csv(DB_FILE, index=False)
+    
+    if news_data:
+        df_new = pd.DataFrame(news_data)
+        if os.path.exists(DB_FILE):
+            df_old = pd.read_csv(DB_FILE)
+            df_new = pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(100)
+        df_new.to_csv(DB_FILE, index=False)
 
-def get_confluence_score(prices, deltas, avg_alpha):
-    score = 0
-    if abs(avg_alpha) >= 3.0: score += 30
-    if np.sign(deltas['CL=F']) == np.sign(deltas['BZ=F']): score += 25
-    if prices['^VIX'] < 22: score += 20
-    if (deltas['AUDJPY=X'] > 0 and avg_alpha > 0) or (deltas['AUDJPY=X'] < 0 and avg_alpha < 0): score += 25
-    return score
+@st.cache_data(ttl=300)
+def get_market_intel():
+    try:
+        # Aumentamos para 7d para garantir dados em fins de semana/feriados
+        data = yf.download(SUSPECT_ASSETS, period="7d", interval="1h", progress=False)['Close']
+        if data.empty: return None
+        
+        # Limpeza de dados: preenche NaN com o último valor disponível (Forward Fill)
+        data = data.ffill().bfill()
+        
+        prices = data.iloc[-1]
+        deltas = ((data.iloc[-1] / data.iloc[0]) - 1) * 100
+        # Preenche correlações vazias com 0 para evitar erros no gráfico
+        corr = data.corr().fillna(0)
+        
+        return prices, deltas, corr
+    except: return None
 
-# --- 3. INTERFACE ---
+# --- 4. INTERFACE ---
 def main():
     run_global_scrap()
     market = get_market_intel()
-    if not market: 
-        st.error("Erro na conexão financeira.")
+    if market is None:
+        st.warning("Aguardando sincronização de mercado...")
         return
         
     prices, deltas, corr_matrix = market
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0
-    c_score = get_confluence_score(prices, deltas, avg_alpha)
     
-    # --- HEADER CARDS ---
-    st.title("CORE")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("WTI CRUDE", f"$ {prices['CL=F']:.2f}", f"{deltas['CL=F']:.2f}%")
-    with c2: st.metric("BRENT CRUDE", f"$ {prices['BZ=F']:.2f}", f"{deltas['BZ=F']:.2f}%")
-    with c3:
-        df_trades = pd.read_csv(TRADE_LOG_FILE) if os.path.exists(TRADE_LOG_FILE) else pd.DataFrame()
-        lucro = df_trades['PnL'].sum() if not df_trades.empty else 0
-        st.metric("BANCA (EUR)", f"{300 + lucro:.2f}", f"{lucro:+.2f}")
-    with c4:
-        color = "green" if c_score > 70 else "yellow" if c_score > 40 else "red"
-        st.metric("CONFLUÊNCIA", f"{c_score}%", help="Score para autorizar entrada")
+    # Barra de Status Dinâmica
+    status_color = "#00FFC8" if abs(avg_alpha) > 2 else "#FFA500"
+    st.markdown(f"""
+        <div class="status-bar" style="border-left-color: {status_color}">
+            V54 NEON QUANT | IA Treinada com 22 Lexicons | Regime: {"Fase de Tendência" if abs(deltas.get('CL=F', 0)) > 0.5 else "Fase Lateral"}
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Grid de Métricas Protegido contra Erros
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("WTI", f"$ {prices.get('CL=F', 0):.2f}", f"{deltas.get('CL=F', 0):.2f}%")
+    m2.metric("VIX", f"{prices.get('^VIX', 0):.2f}", f"{deltas.get('^VIX', 0):.2f}%")
+    m3.metric("ALPHA", f"{avg_alpha:.2f}")
+    
+    lucro = 0
+    if os.path.exists(TRADE_LOG_FILE):
+        try:
+            lucro = pd.read_csv(TRADE_LOG_FILE)['PnL'].sum()
+        except: pass
+    m4.metric("BANCA", f"{300 + lucro:.2f} €")
 
     st.markdown("---")
-
-    col_left, col_right = st.columns([1, 1])
-
-    with col_left:
-        # GAUGE DE SENTIMENTO
-        fig_gauge = go.Figure(go.Indicator(
-            mode = "gauge+number", value = avg_alpha,
-            title = {'text': "SENTIMENTO IA", 'font': {'size': 20, 'color': '#00FFC8'}},
-            gauge = {
-                'axis': {'range': [-10, 10], 'tickwidth': 1},
-                'bar': {'color': "#00FFC8"},
-                'bgcolor': "#0D1421",
-                'steps': [
-                    {'range': [-10, -3], 'color': "#FF4B4B"},
-                    {'range': [3, 10], 'color': "#00FFC8"}
-                ],
-            }
-        ))
-        fig_gauge.update_layout(paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, height=350)
-        st.plotly_chart(fig_gauge, width="stretch")
-
-    with col_right:
-        # RADAR DE ATIVOS SUSPEITOS (Funcional e bonitão)
-        st.markdown("<h3 style='text-align: center; color: #00FFC8;'>SUSPECT RADAR</h3>", unsafe_allow_html=True)
-        radar_labels = ['DXY (Dólar)', 'VIX (Medo)', 'Yields (Juros)', 'CAD (Canadá)', 'XLE (Energia)', 'AUD/JPY (Risco)']
-        radar_values = [abs(deltas['DX-Y.NYB'])*10, abs(deltas['^VIX']), abs(deltas['^TNX'])*5, abs(deltas['USDCAD=X'])*100, abs(deltas['XLE'])*5, abs(deltas['AUDJPY=X'])*10]
-        
-        fig_radar = go.Figure(data=go.Scatterpolar(
-            r=radar_values,
-            theta=radar_labels,
-            fill='toself',
-            line_color='#00FFC8',
-            marker=dict(size=8)
-        ))
-        fig_radar.update_layout(
-            polar=dict(radialaxis=dict(visible=False), bgcolor="#0D1421"),
-            paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, height=350, margin=dict(t=30, b=30)
-        )
-        st.plotly_chart(fig_radar, width="stretch")
-
-    # --- TABS ---
-    t_news, t_suspects, t_ia = st.tabs(["NOTÍCIAS EM TEMPO REAL", "DETALHES SUSPEITOS", "LOG DA IA"])
     
-    with t_news:
-        st.dataframe(df_news.head(40), width="stretch", hide_index=True)
+    c_left, c_right = st.columns(2)
+    with c_left:
+        # Radar de Suspeitos com tratamento de NaN
+        labels = ['DXY', 'VIX', 'Yields', 'CAD', 'XLE', 'AUD/JPY']
+        r_vals = [
+            abs(deltas.get('DX-Y.NYB', 0))*20, 
+            abs(deltas.get('^VIX', 0)), 
+            abs(deltas.get('^TNX', 0))*10, 
+            abs(deltas.get('USDCAD=X', 0))*150, 
+            abs(deltas.get('XLE', 0))*10, 
+            abs(deltas.get('AUDJPY=X', 0))*20
+        ]
+        fig_radar = go.Figure(data=go.Scatterpolar(r=r_vals, theta=labels, fill='toself', line_color='#00FFC8'))
+        fig_radar.update_layout(polar=dict(bgcolor="#0D1421"), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, height=350)
+        st.plotly_chart(fig_radar, use_container_width=True)
+    
+    with c_right:
+        # Heatmap de Correlação
+        fig_corr = go.Figure(data=go.Heatmap(z=corr_matrix.values, x=corr_matrix.columns, y=corr_matrix.index, colorscale='Viridis'))
+        fig_corr.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_corr, use_container_width=True)
 
-    with t_suspects:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.write("**Mapa de Correlação (Como os suspeitos afetam o Petróleo)**")
-            fig_corr = go.Figure(data=go.Heatmap(
-                z=corr_matrix.values, x=corr_matrix.columns, y=corr_matrix.index,
-                colorscale='Viridis'
-            ))
-            fig_corr.update_layout(height=400, paper_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_corr, width="stretch")
-        with c2:
-            st.write("**Variação 24h (%)**")
-            st.bar_chart(deltas)
-
-    with t_ia:
-        st.table(df_trades.sort_index(ascending=False).head(15))
+    st.tabs(["Notícias Treinadas", "Logs"])[0].dataframe(df_news.head(25), use_container_width=True)
 
 if __name__ == "__main__":
     main()
