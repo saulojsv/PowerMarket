@@ -8,35 +8,41 @@ import yfinance as yf
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E HARMONIA VISUAL ---
+# --- 1. CONFIGURAÇÕES E HARMONIA VISUAL (CORREÇÃO DE TELA PRETA) ---
 st.set_page_config(page_title="Terminal - XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v54_refresh_pro")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #050A12; color: #FFFFFF; }
+    /* Gradiente Profundo para evitar tela preta travada */
+    .stApp { 
+        background: radial-gradient(circle, #0D1421 0%, #050A12 100%); 
+        color: #FFFFFF; 
+    }
     header {visibility: hidden;}
     .main .block-container {padding-top: 1.5rem;}
     
-    /* Metrics High Contrast */
+    /* Tipografia de Alta Legibilidade */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+    /* Métricas e Cards */
     [data-testid="stMetricValue"] { font-size: 28px !important; color: #00FFC8 !important; font-weight: 700 !important; }
     [data-testid="stMetricLabel"] { font-size: 12px !important; color: #94A3B8 !important; text-transform: uppercase; }
     
-    /* Cards de Tendência */
-    .trend-card {
-        padding: 15px; border-radius: 10px; background: #0D1421; 
-        border: 1px solid #1E293B; text-align: center;
+    .ai-brain {
+        background: rgba(0, 255, 200, 0.05);
+        border: 1px solid rgba(0, 255, 200, 0.2);
+        padding: 20px; border-radius: 12px; margin-bottom: 20px;
     }
-    .trend-label { color: #94A3B8; font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .trend-value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+
+    /* Tabela Estilizada */
+    .reportview-container table { color: #FFFFFF; }
+    a { color: #00FFC8 !important; text-decoration: none; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- PARÂMETROS ---
-DB_FILE = "Oil_Station_V54_Master.csv"
-SUSPECT_ASSETS = ["CL=F", "DX-Y.NYB", "^VIX", "^TNX"]
-
-# --- 2. BASE DE CONHECIMENTO COMPLETA ---
+# --- 2. BASE DE CONHECIMENTO COMPLETA (20 FONTES / 22 LEXICONS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -88,6 +94,7 @@ LEXICON_TOPICS = {
 # --- 3. MOTOR DE INTELIGÊNCIA ---
 def run_global_scrap():
     news_data = []
+    DB_FILE = "Oil_Station_V54_Master.csv"
     for name, url in RSS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
@@ -97,14 +104,7 @@ def run_global_scrap():
                 for patt, (w, d, c) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         score = w * d; cat = c; break
-                news_data.append({
-                    "Data": datetime.now().strftime("%H:%M"), 
-                    "Fonte": name, 
-                    "Manchete": entry.title[:85], 
-                    "Alpha": score, 
-                    "Cat": cat,
-                    "Link": entry.link
-                })
+                news_data.append({"Data": datetime.now().strftime("%H:%M"), "Fonte": name, "Manchete": entry.title[:85], "Alpha": score, "Cat": cat, "Link": entry.link})
         except: continue
     if news_data:
         df_new = pd.DataFrame(news_data)
@@ -114,22 +114,59 @@ def run_global_scrap():
         df_new.to_csv(DB_FILE, index=False)
 
 @st.cache_data(ttl=300)
-def get_market_analysis():
+def get_intel():
     try:
         data_h1 = yf.download("CL=F", period="10d", interval="1h", progress=False)['Close'].ffill()
         data_d1 = yf.download("CL=F", period="60d", interval="1d", progress=False)['Close'].ffill()
-        
-        day_trend = "BULLISH" if data_h1.iloc[-1] > data_h1.rolling(20).mean().iloc[-1] else "BEARISH"
-        swing_trend = "BULLISH" if data_d1.iloc[-1] > data_d1.rolling(50).mean().iloc[-1] else "BEARISH"
-        
-        return {
-            "price": data_h1.iloc[-1],
-            "delta": ((data_h1.iloc[-1] / data_h1.iloc[0]) - 1) * 100,
-            "day_trend": day_trend, "swing_trend": swing_trend
-        }
+        price = data_h1.iloc[-1]
+        day_trend = "BULLISH" if price > data_h1.rolling(20).mean().iloc[-1] else "BEARISH"
+        swing_trend = "BULLISH" if price > data_d1.rolling(50).mean().iloc[-1] else "BEARISH"
+        return {"price": price, "day": day_trend, "swing": swing_trend, "delta": ((price/data_h1.iloc[0])-1)*100}
     except: return None
 
 # --- 4. INTERFACE ---
 def main():
     run_global_scrap()
-    analysis
+    intel = get_intel()
+    DB_FILE = "Oil_Station_V54_Master.csv"
+    df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
+    avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
+
+    # IA Autonomous Brain
+    st.markdown(f"""
+        <div class="ai-brain">
+            <span style="color: #00FFC8; font-weight: 700; font-size: 13px;">IA INITIATIVE ENGINE</span>
+            <div style="margin-top: 8px; font-size: 15px;">
+                {'ALTA CONVICÇÃO: Alpha Geopolítico alinhado à tendência de H1.' if avg_alpha > 7 and intel and intel['day'] == "BULLISH" else '⚖️ MONITORANDO: Fluxo neutro ou sinais divergentes.'}
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Métricas
+    c1, c2, c3, c4 = st.columns(4)
+    if intel:
+        c1.metric("WTI", f"$ {intel['price']:.2f}", f"{intel['delta']:.2f}%")
+        c2.metric("IA ALPHA", f"{avg_alpha:.2f}")
+        c3.metric("DAYTRADE", intel['day'])
+        c4.metric("SWING", intel['swing'])
+
+    st.markdown("---")
+
+    col_v, col_n = st.columns([1, 1.8])
+    with col_v:
+        fig = go.Figure(go.Indicator(
+            mode = "gauge+number", value = avg_alpha,
+            gauge = {'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"}, 'bgcolor': "#0D1421"}
+        ))
+        fig.update_layout(height=250, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+        st.plotly_chart(fig, width='stretch')
+
+    with col_n:
+        st.markdown("### Terminal - XTIUSD")
+        if not df_news.empty:
+            df_display = df_news.head(15).copy()
+            df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">OPEN LINK</a>')
+            st.markdown(df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False), unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
