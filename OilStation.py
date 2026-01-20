@@ -142,7 +142,7 @@ def main():
         st.session_state['monitor'] = True
 
     c_head1, c_head2 = st.columns([3, 1])
-    with c_head1: st.markdown("#  TERMINAL XTIUSD <span style='color:white'>V54 GOLD</span>", unsafe_allow_html=True)
+    with c_head1: st.markdown("#  TERMINAL XTIUSD <span style='color:white'></span>", unsafe_allow_html=True)
     with c_head2: st.markdown(f"**STATUS:** <span style='color:#39FF14'>● LIVE FEED</span>\n\n{datetime.now().strftime('%H:%M:%S')}")
 
     if os.path.exists(DB_FILE):
@@ -188,3 +188,4 @@ def main():
                              column_config={"Contagem": st.column_config.ProgressColumn("PROGRESSO IA (30x)", min_value=0, max_value=30)}, use_container_width=True, hide_index=True)
 
 if __name__ == "__main__": main()
+
