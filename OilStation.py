@@ -11,12 +11,11 @@ import numpy as np
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E BANCO DE DADOS ---
-DB_FILE = "Oil_Station_V49_Master.csv"
-BRAIN_FILE = "Market_Brain_V49.csv"
-st_autorefresh(interval=60000, key="v49_refresh")
+# --- 1. CONFIGURAÇÕES ---
+DB_FILE = "Oil_Station_V51_Master.csv"
+BRAIN_FILE = "Market_Brain_V51.csv"
+st_autorefresh(interval=60000, key="v51_refresh")
 
-# --- 2. TERMINAIS RSS ---
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -26,7 +25,7 @@ RSS_SOURCES = {
     "gCaptain": "https://gcaptain.com/feed/"
 }
 
-# --- 3. SEUS 22 DADOS LEXICON ---
+# --- 2. SEUS 22 DADOS LEXICON ORIGINAIS ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
@@ -52,101 +51,126 @@ LEXICON_TOPICS = {
     r"contango|discount|storage play": [7.5, -1, "Estrutura (Bearish)"]
 }
 
-# --- 4. MOTOR ANALÍTICO (INTERPRETATION) ---
-def get_interpretation(title, alpha, pattern, type_news):
-    t_lower = title.lower()
-    direcao = "BULLISH (Alta)" if alpha > 0 else "BEARISH (Baixa)"
-    impacto_base = abs(alpha)
-    
-    # Resumo da decisão
-    resumo = f"[{type_news}] '{pattern}' indica {direcao}. "
-    
-    # Lógica de Intensidade
-    if impacto_base >= 9: resumo += "Impacto Crítico na oferta global. "
-    elif impacto_base >= 7: resumo += "Impacto Moderado. "
-    else: resumo += "Driver Secundário. "
-    
-    # Lógica de Incerteza (Probabilidade)
-    if any(x in t_lower for x in ["may", "could", "potential", "rumor", "possible"]):
-        resumo += "Cálculo reduzido em 25% por incerteza verbal."
+# --- 3. MOTOR DE INTELIGÊNCIA ADAPTATIVA ---
+def get_auto_category(word):
+    w = word.lower()
+    if any(x in w for x in ["opec", "saudi", "cut"]): return "Política Energética"
+    if any(x in w for x in ["war", "strike", "attack"]): return "Risco Geopolítico"
+    if any(x in w for x in ["fed", "rate", "inflation"]): return "Macro & Financeiro"
+    return "Driver Emergente"
+
+def update_brain(word, title):
+    if not os.path.exists(BRAIN_FILE):
+        df_brain = pd.DataFrame(columns=['Termo', 'Contagem', 'Peso_Alpha', 'Categoria', 'Ultima_Vez'])
     else:
-        resumo += "Confiança nominal mantida (Fato Concretizado)."
-        
-    return resumo
+        df_brain = pd.read_csv(BRAIN_FILE)
+    
+    if word in df_brain['Termo'].values:
+        idx = df_brain['Termo'] == word
+        count = df_brain.loc[idx, 'Contagem'].values[0] + 1
+        new_weight = np.clip(2.0 + (count * 0.1), 1.0, 9.5)
+        df_brain.loc[idx, ['Contagem', 'Peso_Alpha', 'Ultima_Vez']] = [count, new_weight, datetime.now().strftime("%H:%M")]
+    else:
+        new_row = {'Termo': word, 'Contagem': 1, 'Peso_Alpha': 2.0, 'Categoria': get_auto_category(word), 'Ultima_Vez': datetime.now().strftime("%H:%M")}
+        df_brain = pd.concat([df_brain, pd.DataFrame([new_row])], ignore_index=True)
+    
+    df_brain.to_csv(BRAIN_FILE, index=False)
+    return df_brain[df_brain['Termo'] == word].iloc[0]
 
-def calculate_logic(title, alpha, pattern, type_news):
+# --- 4. MOTOR DE FUSÃO (MULTIVARIÁVEL) ---
+def analyze_reality(title):
     t_lower = title.lower()
-    # Sigmoide para conversão em %
-    prob = 1 / (1 + np.exp(-0.12 * abs(alpha)))
+    weights = []
+    found_elements = []
     
-    if any(x in t_lower for x in ["may", "could", "potential", "rumor"]):
-        prob *= 0.75 # Penalidade por incerteza
-    
-    side = "COMPRA" if alpha > 0 else "VENDA"
-    interpretation = get_interpretation(title, alpha, pattern, type_news)
-    
-    return f"{np.clip(prob, 0.52, 0.91)*100:.1f}% {side}", alpha, interpretation
+    # 1. Checa todos os Lexicons (Não para no primeiro)
+    for pat, par in LEXICON_TOPICS.items():
+        if re.search(pat, t_lower):
+            weights.append(par[0] * par[1])
+            found_elements.append(f"Lexicon({re.search(pat, t_lower).group()})")
+            
+    # 2. Checa Cérebro IA (Palavras Aprendidas)
+    if os.path.exists(BRAIN_FILE):
+        brain = pd.read_csv(BRAIN_FILE)
+        graduados = brain[brain['Contagem'] >= 30]
+        for _, row in graduados.iterrows():
+            if row['Termo'].lower() in t_lower:
+                bias = 1.0 if any(x in t_lower for x in ["surge", "spike", "up"]) else -1.0
+                weights.append(row['Peso_Alpha'] * bias)
+                found_elements.append(f"IA({row['Termo']})")
 
-# --- 5. MONITOR DE NOTÍCIAS ---
+    # 3. Aprendizado de Novas Palavras (Regra dos 30)
+    if any(x in t_lower for x in ["surge", "plunge", "spike", "drop"]):
+        words = re.findall(r'\b[a-zA-Z]{7,}\b', t_lower)
+        for nw in words: update_brain(nw, title)
+
+    if not weights: return None
+    
+    # Cálculo Final
+    avg_alpha = sum(weights) / len(weights)
+    prob = 1 / (1 + np.exp(-0.12 * abs(avg_alpha)))
+    if any(x in t_lower for x in ["may", "could", "potential", "rumor"]): prob *= 0.75
+    
+    side = "COMPRA" if avg_alpha > 0 else "VENDA"
+    interpretation = f"Fusão de {len(found_elements)} fatores: {', '.join(found_elements)}. Média Alpha: {avg_alpha:.2f}."
+    
+    return f"{np.clip(prob, 0.52, 0.95)*100:.1f}% {side}", avg_alpha, interpretation
+
+# --- 5. MONITOR RSS ---
 def news_monitor():
     while True:
         for source, url in RSS_SOURCES.items():
             try:
                 feed = feedparser.parse(url)
                 for entry in feed.entries[:10]:
-                    t_lower = entry.title.lower()
-                    found = False
-                    for pat, par in LEXICON_TOPICS.items():
-                        match = re.search(pat, t_lower)
-                        if match:
-                            sent, f_alpha, interp = calculate_logic(entry.title, par[0] * par[1], match.group(), "LEXICON")
-                            data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Interpretation": interp, "Alpha": f_alpha, "TS": datetime.now().isoformat()}
-                            pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
-                            found = True
-                            break
-                    # Lógica para termos aprendidos (IA Evolutiva)
-                    if not found and any(x in t_lower for x in ["surge", "plunge", "spike"]):
-                        words = re.findall(r'\b[a-zA-Z]{7,}\b', t_lower)
-                        # ... lógica de update_brain simplificada para o exemplo ...
+                    analysis = analyze_reality(entry.title)
+                    if analysis:
+                        sent, alpha, interp = analysis
+                        data = {"Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title, "Sent": sent, "Interpretation": interp, "Alpha": alpha, "Link": entry.link, "TS": datetime.now().isoformat()}
+                        pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
-# --- 6. INTERFACE STREAMLIT ---
+# --- 6. UI ---
 def main():
-    st.set_page_config(page_title="QUANT STATION V49", layout="wide")
-    
-    st.markdown("""<style>
-        .stApp { background-color: #050C1A !important; }
-        .decision-badge { padding: 15px; border-radius: 8px; text-align: center; font-family: 'Arial Black'; font-size: 24px; margin-bottom: 20px; border: 2px solid; }
-        .stDataFrame td { background-color: #050C1A !important; color: #64FFDA !important; font-weight: bold !important; }
-    </style>""", unsafe_allow_html=True)
-
+    st.set_page_config(page_title="QUANT STATION V51", layout="wide")
     if 'monitor' not in st.session_state:
         threading.Thread(target=news_monitor, daemon=True).start()
         st.session_state['monitor'] = True
+
+    st.markdown("""<style>
+        .stApp { background-color: #050C1A !important; }
+        .decision-box { padding: 25px; border-radius: 15px; text-align: center; font-family: 'Arial Black'; font-size: 35px; border: 3px solid; text-transform: uppercase; }
+        .stDataFrame td { font-size: 13px !important; color: #64FFDA !important; }
+    </style>""", unsafe_allow_html=True)
 
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('TS', ascending=False)
         
         c1, c2 = st.columns([1.5, 1.5])
         with c1:
-            st.title("QUANT V49")
-            # Velocímetro simplificado
-            avg_a = df.head(50)['Alpha'].mean() if not df.empty else 0
+            st.title("ENGINE TEST")
+            avg_a = df.head(30)['Alpha'].mean()
             val = np.clip(50 + (avg_a * 4.5), 0, 100)
             fig = go.Figure(go.Indicator(mode="gauge+number", value=val, number={'suffix': "%", 'font': {'color': '#64FFDA'}},
-                gauge={'axis': {'range': [0, 100]}, 'bar': {'color': '#64FFDA'}}))
-            fig.update_layout(height=180, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+                                         gauge={'axis': {'range': [0, 100]}, 'bar': {'color': '#64FFDA'}}))
+            fig.update_layout(height=220, margin=dict(t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
             st.plotly_chart(fig, use_container_width=True)
 
         with c2:
-            st.write("RESUMO DO SENTIMENTO GLOBAL")
-            if val >= 70: st.markdown('<div class="decision-badge" style="color: #39FF14; border-color: #39FF14; background: rgba(57,255,20,0.1)">FORTE COMPRA</div>', unsafe_allow_html=True)
-            elif val <= 30: st.markdown('<div class="decision-badge" style="color: #FF4B4B; border-color: #FF4B4B; background: rgba(255,75,75,0.1)">FORTE VENDA</div>', unsafe_allow_html=True)
-            else: st.markdown('<div class="decision-badge" style="color: #E0E0E0; border-color: #E0E0E0; background: rgba(224,224,224,0.1)">NEUTRO</div>', unsafe_allow_html=True)
+            if val >= 70: st.markdown('<div class="decision-box" style="color:#39FF14; border-color:#39FF14;">FORTE COMPRA</div>', unsafe_allow_html=True)
+            elif val <= 30: st.markdown('<div class="decision-box" style="color:#FF4B4B; border-color:#FF4B4B;">FORTE VENDA</div>', unsafe_allow_html=True)
+            else: st.markdown('<div class="decision-box" style="color:#E0E0E0; border-color:#E0E0E0;">AGUARDAR</div>', unsafe_allow_html=True)
 
-        st.subheader("FLUXO ADAPTATIVO COM INTERPRETAÇÃO")
-        # Coluna Interpretation adicionada ao dataframe principal
-        st.dataframe(df[['Hora', 'Manchete', 'Sent', 'Interpretation']].head(100), width='stretch')
+        t1, t2, t3 = st.tabs(["FLUXO REALITY", "HEATMAP", "CÉREBRO ADAPTATIVO"])
+        with t1:
+            st.dataframe(df[['Hora', 'Manchete', 'Sent', 'Interpretation', 'Link']].head(100), 
+                         column_config={"Link": st.column_config.LinkColumn("Notícia")}, width='stretch')
+        with t2:
+            st.plotly_chart(px.treemap(df.head(100), path=['Fonte'], values='Alpha', color='Alpha', color_continuous_scale='RdYlGn'), use_container_width=True)
+        with t3:
+            if os.path.exists(BRAIN_FILE):
+                st.dataframe(pd.read_csv(BRAIN_FILE).sort_values('Contagem', ascending=False), 
+                             column_config={"Contagem": st.column_config.ProgressColumn("Amostras (30x)", min_value=0, max_value=30)}, width='stretch')
 
 if __name__ == "__main__": main()
