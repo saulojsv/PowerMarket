@@ -10,42 +10,42 @@ import yfinance as yf
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÃO DE AMBIENTE E ESTILO ---
-st.set_page_config(page_title="QUANT STATION V54 | PRO", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v54_refresh")
+# --- 1. PARÂMETROS DE BANCA E RISCO (300€) ---
+BANCA_INICIAL = 300.00
+MULTIPLICADOR_MICRO = 10.0  # 1.00 USD no Petróleo = 10.00€ (Contrato Micro)
+IA_STOP_LOSS = 50.0        
+IA_TAKE_PROFIT = 100.00     
+
+st.set_page_config(page_title="V54 | BANCA 300€ IA", layout="wide", initial_sidebar_state="collapsed")
+st_autorefresh(interval=60000, key="v54_refresh_pro")
 
 DB_FILE = "Oil_Station_V54_Master.csv"
 TRADE_LOG_FILE = "Trade_Simulation_V54.csv"
 
-st.markdown("""
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-        .stApp { background-color: #02060C; color: #E0E0E0; font-family: 'JetBrains Mono', monospace; }
-        [data-testid="stMetricValue"] { font-size: 20px !important; color: #39FF14 !important; }
-        div[data-testid="stMetric"] { background-color: #0B121D; border-left: 4px solid #39FF14; padding: 10px; border-radius: 4px; }
-        .pnl-pos { color: #39FF14; font-weight: bold; }
-        .pnl-neg { color: #FF4B4B; font-weight: bold; }
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-        .stTabs [data-baseweb="tab"] { background-color: #0B121D; border-radius: 4px; color: #8a96a3; }
-        .stTabs [aria-selected="true"] { border-bottom-color: #39FF14 !important; color: #39FF14 !important; }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 2. OS 10 SITES (FONTES RSS/XML) ---
+# --- 2. CONFIGURAÇÕES (SITES E LEXICONS) ---
 RSS_SOURCES = {
-    "OilPrice": "https://oilprice.com/rss/main",
-    "Reuters Energy": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
-    "Investing Oil": "https://www.investing.com/rss/news_11.rss",
-    "CNBC Energy": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
-    "EIA Reports": "https://www.eia.gov/about/rss/todayinenergy.xml",
+    "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
+    "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
+    "CNBC Commodities": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
+    "FT Commodities": "https://www.ft.com/commodities?format=rss",
+    "WSJ Energy": "https://feeds.a.dj.com/rss/RSSWSJ.xml",
+    "OilPrice Main": "https://oilprice.com/rss/main",
+    "Rigzone": "https://www.rigzone.com/news/rss/rigzone_latest.xml",
+    "S&P Global Platts": "https://www.spglobal.com/platts/en/rss-feed/news/oil",
+    "Energy Voice": "https://www.energyvoice.com/category/oil-and-gas/feed/",
+    "EIA Today": "https://www.eia.gov/about/rss/todayinenergy.xml",
+    "Investing.com": "https://www.investing.com/rss/news_11.rss",
     "MarketWatch": "http://feeds.marketwatch.com/marketwatch/marketpulse/",
-    "Yahoo Finance": "https://finance.yahoo.com/rss/headline?s=CL=F",
-    "Bloomberg": "https://www.bloomberg.com/feeds/bview/energy.xml",
-    "S&P Global": "https://www.spglobal.com/platts/en/rss-feed/news/oil",
-    "Rigzone": "https://www.rigzone.com/news/rss/rigzone_latest.xml"
+    "Yahoo Finance Oil": "https://finance.yahoo.com/rss/headline?s=CL=F",
+    "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
+    "Foreign Policy": "https://foreignpolicy.com/feed/",
+    "Lloyds List": "https://lloydslist.maritimeintelligence.informa.com/RSS/News",
+    "Marine Insight": "https://www.marineinsight.com/feed/",
+    "Splash 247": "https://splash247.com/feed/",
+    "OPEC Press": "https://www.opec.org/opec_web/en/press_room/311.xml",
+    "IEA News": "https://www.iea.org/news/rss"
 }
 
-# --- 3. OS 22 LEXICONS (EIXOS MACRO) ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation|invasion": [9.8, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade|nuclear": [9.0, 1, "Geopolítica (Sanções)"],
@@ -71,71 +71,116 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Fluxo Quant"]
 }
 
-# --- 4. MOTOR DE DADOS E SIMULAÇÃO ---
+# --- 3. MOTOR DE GESTÃO IA (EXECUÇÃO E RISCO) ---
+
+def run_ia_management(current_oil, avg_alpha):
+    """IA decide entradas e monitora saídas para proteger os 300€"""
+    if not os.path.exists(TRADE_LOG_FILE):
+        pd.DataFrame(columns=["Data", "Tipo", "Entrada", "Status", "PnL", "Motivo"]).to_csv(TRADE_LOG_FILE, index=False)
+    
+    df = pd.read_csv(TRADE_LOG_FILE)
+    
+    # 1. Verificar Saídas (Take Profit / Stop Loss)
+    if not df.empty and (df['Status'] == 'OPEN').any():
+        idx = df[df['Status'] == 'OPEN'].index[0]
+        row = df.iloc[idx]
+        
+        # Cálculo de lucro/perda real
+        pnl_float = (current_oil - row['Entrada']) * MULTIPLICADOR_MICRO if row['Tipo'] == 'BUY' else (row['Entrada'] - current_oil) * MULTIPLICADOR_MICRO
+        
+        exit_trigger = None
+        if pnl_float >= IA_TAKE_PROFIT: exit_trigger = "IA_TP_REACHED"
+        elif pnl_float <= -IA_STOP_LOSS: exit_trigger = "IA_SL_PROTECTION"
+        
+        if exit_trigger:
+            df.at[idx, 'Status'] = 'CLOSED'
+            df.at[idx, 'PnL'] = pnl_float
+            df.at[idx, 'Motivo'] = exit_trigger
+            df.to_csv(TRADE_LOG_FILE, index=False)
+            st.toast(f"Trade encerrado pela IA: {exit_trigger}")
+
+    # 2. Verificar Entradas (Apenas se não houver trade aberto)
+    else:
+        side = None
+        if avg_alpha >= 3.0: side = "BUY"
+        elif avg_alpha <= -3.0: side = "SELL"
+        
+        if side:
+            new_row = {"Data": datetime.now().strftime("%H:%M"), "Tipo": side, 
+                       "Entrada": current_oil, "Status": "OPEN", "PnL": 0, "Motivo": "ALPHA_SIGNAL"}
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            df.to_csv(TRADE_LOG_FILE, index=False)
+            st.toast(f"IA entrou em {side} no Petróleo", icon="🚀")
+
+# --- 4. FUNÇÕES DE SUPORTE (MANTIDAS) ---
+def run_global_scrap():
+    news_data = []
+    for name, url in RSS_SOURCES.items():
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:5]:
+            title = entry.title
+            score, cat = 0, "Neutral"
+            for patt, (w, d, c) in LEXICON_TOPICS.items():
+                if re.search(patt, title.lower()):
+                    score = w * d
+                    cat = c
+                    break
+            news_data.append({"TS": time.time(), "Data": datetime.now().strftime("%H:%M"), 
+                              "Fonte": name, "Manchete": title[:80], "Alpha": score, "Cat": cat})
+    df = pd.DataFrame(news_data)
+    if os.path.exists(DB_FILE):
+        df = pd.concat([df, pd.read_csv(DB_FILE)]).drop_duplicates(subset=['Manchete']).head(100)
+    df.to_csv(DB_FILE, index=False)
+
 def get_market_intel():
     try:
         tickers = ["CL=F", "DX-Y.NYB", "USDCAD=X", "GC=F"]
         data = yf.download(tickers, period="2d", interval="15m", progress=False)['Close']
-        last = data.iloc[-1]
-        delta = ((last / data.iloc[0]) - 1) * 100
-        return last, delta, data.corr()
-    except: return None, None, None
-
-def log_trade(side, price, reason):
-    new_t = pd.DataFrame([{"Hora": datetime.now().strftime("%H:%M:%S"), "Lote": 1.0, 
-                           "Tipo": side, "Entrada": price, "Contexto": reason, "TS": datetime.now().timestamp()}])
-    if os.path.exists(TRADE_LOG_FILE):
-        log = pd.read_csv(TRADE_LOG_FILE)
-        if (datetime.now().timestamp() - log['TS'].iloc[-1]) > 900:
-            pd.concat([log, new_t], ignore_index=True).to_csv(TRADE_LOG_FILE, index=False)
-    else: new_t.to_csv(TRADE_LOG_FILE, index=False)
+        return data.iloc[-1], ((data.iloc[-1]/data.iloc[0])-1)*100, data.corr()
+    except: return None
 
 # --- 5. INTERFACE ---
 def main():
-    prices, deltas, corr_matrix = get_market_intel()
+    st.markdown("""<style> .stApp { background-color: #02060C; color: #E0E0E0; } </style>""", unsafe_allow_html=True)
     
-    st.title("TERMINAL XTI")
+    # Execução do Motor
+    run_global_scrap()
+    market = get_market_intel()
+    if not market: return
+    prices, deltas, corr = market
     
-    if prices is not None:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("WTI OIL", f"${prices['CL=F']:.2f}", f"{deltas['CL=F']:.2f}%")
-        c2.metric("DXY", f"{prices['DX-Y.NYB']:.2f}", f"{deltas['DX-Y.NYB']:.2f}%", delta_color="inverse")
-        c3.metric("USDCAD", f"{prices['USDCAD=X']:.4f}", f"{deltas['USDCAD=X']:.2f}%", delta_color="inverse")
-        c4.metric("GOLD", f"${prices['GC=F']:.1f}", f"{deltas['GC=F']:.2f}%")
+    df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
+    avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0
+    
+    # IA Rodando em background
+    run_ia_management(prices['CL=F'], avg_alpha)
 
-    tab_news, tab_corr, tab_pnl = st.tabs(["📊 NEWS FLOW", "🔗 CORRELATIONS", "🏦 TRADING PNL"])
+    # UI BANNER
+    st.markdown(f"""<div style="background:#0B121D; padding:15px; border-radius:5px; border-left:5px solid #39FF14;">
+        <span style="color:#39FF14; font-weight:bold;"> IA MANAGER ATIVO</span> | 
+        Banca Inicial: 300€ | Risco: {IA_STOP_LOSS}€ | Alvo: {IA_TAKE_PROFIT}€
+    </div>""", unsafe_allow_html=True)
 
+    # MÉTRICAS E VELOCÍMETRO
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("WTI OIL", f"${prices['CL=F']:.2f}", f"{deltas['CL=F']:.2f}%")
+    c2.metric("DXY INDEX", f"{prices['DX-Y.NYB']:.2f}")
+    
+    # Saldo Real-Time
+    df_trades = pd.read_csv(TRADE_LOG_FILE) if os.path.exists(TRADE_LOG_FILE) else pd.DataFrame()
+    lucro_acumulado = df_trades['PnL'].sum() if not df_trades.empty else 0
+    c3.metric("BANCA ATUAL", f"€{BANCA_INICIAL + lucro_acumulado:.2f}", f"€{lucro_acumulado:+.2f}")
+    c4.metric("ALPHA SENTIMENT", f"{avg_alpha:.2f}")
+
+    tab_news, tab_trades = st.tabs(["GLOBAL NEWS FLOW", "IA TRADE LOG"])
+    
     with tab_news:
-        if os.path.exists(DB_FILE):
-            df = pd.read_csv(DB_FILE).sort_values('TS', ascending=False)
-            st.dataframe(df[['Data', 'Fonte', 'Manchete', 'Alpha', 'Cat']].head(50), use_container_width=True, hide_index=True)
-            avg_a = df.head(10)['Alpha'].mean()
-        else: avg_a = 0
+        st.dataframe(df_news.head(50), use_container_width=True, hide_index=True)
+    
+    with tab_trades:
+        st.subheader("Histórico de Operações Gerenciadas")
+        st.table(df_trades.sort_index(ascending=False).head(20))
 
-    with tab_corr:
-        st.subheader("Intermarket Correlation Matrix (WTI base)")
-        if corr_matrix is not None:
-            oil_c = corr_matrix[['CL=F']].sort_values(by='CL=F', ascending=False)
-            st.table(oil_c.style.background_gradient(cmap='RdYlGn'))
-        
-        
-
-    with tab_pnl:
-        if prices is not None:
-            # Lógica de Estratégia Cross-Asset
-            if avg_a > 1.5 and deltas['USDCAD=X'] < -0.01 and deltas['DX-Y.NYB'] < 0:
-                log_trade("BUY", prices['CL=F'], "Alpha + CAD Strong + DXY Weak")
-            elif avg_a < -1.5 and deltas['USDCAD=X'] > 0.01 and deltas['DX-Y.NYB'] > 0:
-                log_trade("SELL", prices['CL=F'], "Alpha + CAD Weak + DXY Strong")
-
-        if os.path.exists(TRADE_LOG_FILE):
-            trades = pd.read_csv(TRADE_LOG_FILE).sort_values('TS', ascending=False)
-            trades['Preço_Atual'] = prices['CL=F']
-            trades['PnL_Points'] = trades.apply(lambda r: prices['CL=F'] - r['Entrada'] if r['Tipo']=="BUY" else r['Entrada'] - prices['CL=F'], axis=1)
-            trades['PnL_USD'] = trades['PnL_Points'] * 1000
-            
-            st.table(trades[['Hora', 'Tipo', 'Lote', 'Entrada', 'Preço_Atual', 'PnL_Points', 'PnL_USD', 'Contexto']])
-            st.metric("TOTAL PNL", f"${trades['PnL_USD'].sum():,.2f}")
-        else: st.info("Aguardando confluência macro para entrar.")
-
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()
