@@ -8,7 +8,7 @@ import yfinance as yf
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÕES E ESTILO ---
+# --- 1. CONFIGURAÇÕES E HARMONIA VISUAL ---
 st.set_page_config(page_title="Terminal - XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v54_refresh_pro")
 
@@ -36,7 +36,7 @@ st.markdown("""
 DB_FILE = "Oil_Station_V54_Master.csv"
 SUSPECT_ASSETS = ["CL=F", "DX-Y.NYB", "^VIX", "^TNX"]
 
-# --- 2. BASE DE CONHECIMENTO COMPLETA (20 FONTES E 22 LEXICONS) ---
+# --- 2. BASE DE CONHECIMENTO COMPLETA ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -125,72 +125,11 @@ def get_market_analysis():
         return {
             "price": data_h1.iloc[-1],
             "delta": ((data_h1.iloc[-1] / data_h1.iloc[0]) - 1) * 100,
-            "day_trend": day_trend, "swing_trend": swing_trend,
-            "vix": yf.download("^VIX", period="1d", progress=False)['Close'].iloc[-1]
+            "day_trend": day_trend, "swing_trend": swing_trend
         }
     except: return None
 
 # --- 4. INTERFACE ---
 def main():
     run_global_scrap()
-    analysis = get_market_analysis()
-    if not analysis: return
-        
-    df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
-    avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0
-    
-    # Header e Tendências
-    col_met, col_trend = st.columns([2, 1])
-    with col_met:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("WTI CRUDE", f"$ {analysis['price']:.2f}", f"{analysis['delta']:.2f}%")
-        c2.metric("IA ALPHA", f"{avg_alpha:.2f}")
-        c3.metric("BANCA", "300.00 €")
-
-    with col_trend:
-        dt_c = "#00FFC8" if analysis['day_trend'] == "BULLISH" else "#FF4B4B"
-        st_c = "#00FFC8" if analysis['swing_trend'] == "BULLISH" else "#FF4B4B"
-        st.markdown(f"""
-            <div style="display: flex; gap: 10px;">
-                <div class="trend-card" style="flex: 1; border-bottom: 3px solid {dt_c};">
-                    <div class="trend-label">Daytrade (H1)</div>
-                    <div class="trend-value" style="color: {dt_c};">{analysis['day_trend']}</div>
-                </div>
-                <div class="trend-card" style="flex: 1; border-bottom: 3px solid {st_c};">
-                    <div class="trend-label">Swing (D1)</div>
-                    <div class="trend-value" style="color: {st_c};">{analysis['swing_trend']}</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    
-    # Velocímetro e Tabela
-    col_v, col_n = st.columns([1, 1.8])
-    with col_v:
-        fig_v = go.Figure(go.Indicator(
-            mode = "gauge+number", value = avg_alpha,
-            gauge = {
-                'axis': {'range': [-10, 10], 'tickcolor': "#94A3B8"},
-                'bar': {'color': "#00FFC8" if avg_alpha > 0 else "#FF4B4B"},
-                'bgcolor': "#0D1421",
-                'steps': [{'range': [-10, -5], 'color': 'rgba(255, 75, 75, 0.1)'}, {'range': [5, 10], 'color': 'rgba(0, 255, 200, 0.1)'}]}
-        ))
-        fig_v.update_layout(height=260, margin=dict(t=0, b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-        st.plotly_chart(fig_v, use_container_width=True)
-    
-    with col_n:
-        st.markdown("### Terminal - XTIUSD")
-        if not df_news.empty:
-            # Lógica de Cor + Hiperlink
-            def make_clickable(link):
-                return f'<a href="{link}" target="_blank" style="color: #00FFC8; text-decoration: none; font-weight: bold;">OPEN LINK</a>'
-
-            df_display = df_news.head(15).copy()
-            df_display['Link'] = df_display['Link'].apply(make_clickable)
-
-            # Estilização da Tabela
-            st.write(df_display.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+    analysis
