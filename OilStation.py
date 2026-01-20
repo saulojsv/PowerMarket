@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v67_refresh")
+st_autorefresh(interval=60000, key="v68_refresh")
 
 st.markdown("""
     <style>
@@ -141,7 +141,7 @@ def get_market_metrics():
     prices = {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}
     wti_momentum = 0.0
     try:
-        # Download direto ignorando cache SQLite para evitar OperationalError
+        # ignore_tz=True ajuda a evitar conflitos de cache no banco de dados local
         data = yf.download(list(tickers.values()), period="2d", interval="15m", progress=False, ignore_tz=True)
         if not data.empty and 'Close' in data:
             closes = data['Close'].ffill()
@@ -153,7 +153,7 @@ def get_market_metrics():
                 wti_series = closes["CL=F"]
                 wti_momentum = float(wti_series.pct_change(fill_method=None).iloc[-1]) if len(wti_series) > 1 else 0.0
     except:
-        pass # Falha silenciosa para manter o terminal ativo
+        pass 
     return prices, wti_momentum
 
 # --- 4. RENDERIZAÇÃO ---
@@ -198,7 +198,8 @@ def main():
             gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_color}}
         ))
         fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=50, b=20))
-        st.plotly_chart(fig, use_container_width=True)
+        # Aplicando sintaxe de 2026: width='stretch'
+        st.plotly_chart(fig, width='stretch')
 
     with col_table:
         if not df_news.empty:
