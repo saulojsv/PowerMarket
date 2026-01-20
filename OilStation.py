@@ -10,9 +10,10 @@ import plotly.graph_objects as go
 import numpy as np
 import requests
 from datetime import datetime
+from collections import Counter
 
 # --- DATABASE ---
-DB_FILE = "Oil_Station_V20.csv"
+DB_FILE = "Oil_Station_V21.csv"
 
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
@@ -23,7 +24,7 @@ RSS_SOURCES = {
     "gCaptain": "https://gcaptain.com/feed/"
 }
 
-# --- 22 DADOS LEXICON ---
+# --- 22 DADOS LEXICON ORIGINAIS ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
@@ -49,6 +50,18 @@ LEXICON_TOPICS = {
     r"contango|discount|storage play": [7.5, -1, "Estrutura (Bearish)"]
 }
 
+# --- MOTOR DE APRENDIZADO CRÍTICO ---
+def discover_new_terms(title, source):
+    # Palavras que não estão no Lexicon mas aparecem com frequência
+    words = re.findall(r'\b[a-zA-Z]{5,}\b', title.lower()) # Apenas palavras > 5 letras
+    valid_new = []
+    lexicon_words = "|".join(LEXICON_TOPICS.keys()).lower()
+    
+    for word in words:
+        if word not in lexicon_words and word not in ['energy', 'market', 'prices', 'crude']:
+            valid_new.append(word)
+    return valid_new
+
 def news_monitor():
     while True:
         for source, url in RSS_SOURCES.items():
@@ -56,78 +69,84 @@ def news_monitor():
                 feed = feedparser.parse(url)
                 for entry in feed.entries[:5]:
                     t_lower = entry.title.lower()
+                    # 1. Checa Lexicon Existente
+                    found = False
                     for pattern, params in LEXICON_TOPICS.items():
                         match = re.search(pattern, t_lower)
                         if match:
                             alpha = params[0] * params[1]
                             prob = 1 / (1 + np.exp(-0.5 * alpha))
                             sent = f"{prob*100:.1f}% COMPRA" if prob > 0.5 else f"{(1-prob)*100:.1f}% VENDA"
-                            data = {"Hora": datetime.now().strftime("%H:%M:%S"), "Fonte": source, "Manchete": entry.title[:100], "Categoria": params[2], "Termo": match.group(), "Sentimento": sent, "Alpha": alpha, "Timestamp": datetime.now().isoformat()}
+                            data = {"Hora": datetime.now().strftime("%H:%M:%S"), "Fonte": source, "Manchete": entry.title[:100], "Categoria": params[2], "Termo": match.group(), "Sentimento": sent, "Alpha": alpha, "Timestamp": datetime.now().isoformat(), "Tipo": "Consolidado"}
+                            pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
+                            found = True
+                    
+                    # 2. Se não achou, tenta "Aprender" com Crivo Crítico
+                    if not found:
+                        new_words = discover_new_terms(entry.title, source)
+                        for nw in new_words:
+                            data = {"Hora": datetime.now().strftime("%H:%M:%S"), "Fonte": source, "Manchete": entry.title[:100], "Categoria": "Aprendizado", "Termo": nw, "Sentimento": "Analisando...", "Alpha": 0, "Timestamp": datetime.now().isoformat(), "Tipo": "Descoberta"}
                             pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
 def main():
-    st.set_page_config(page_title="V20 - TOTAL NAVY", layout="wide")
+    st.set_page_config(page_title="V21 - CRITICAL LEARNING", layout="wide")
     
-    # CSS CORRIGIDO: Sidebar e Main em Navy puro
     st.markdown("""<style>
         .stApp, [data-testid="stSidebar"], .stSidebar { background-color: #0A192F !important; }
         * { color: #FFFFFF !important; }
-        
-        /* Tabela e Widgets em Marinho */
-        div[data-testid="stDataFrame"] div, .stMetric, .stAlert { 
-            background-color: #112240 !important; 
-            border: 1px solid #1B2B48;
-        }
-        
-        /* Status Neon */
-        .status-on { color: #39FF14 !important; font-weight: bold; text-shadow: 0 0 5px #39FF14; }
-        .status-off { color: #FF3131 !important; font-weight: bold; }
-        
-        /* Remover bordas brancas da sidebar */
-        [data-testid="stSidebarNav"] { background-color: #0A192F !important; }
+        div[data-testid="stDataFrame"] div { background-color: #112240 !important; }
+        .status-on { color: #39FF14 !important; font-weight: bold; }
+        .new-term { color: #64FFDA !important; font-style: italic; }
     </style>""", unsafe_allow_html=True)
 
     if 'monitor' not in st.session_state:
         threading.Thread(target=news_monitor, daemon=True).start()
         st.session_state['monitor'] = True
 
-    # SIDEBAR DARK NAVY
-    with st.sidebar:
-        st.markdown("### TERMINAIS RSS")
-        for s in RSS_SOURCES.keys():
-            st.markdown(f"• {s}: <span class='status-on'>ONLINE</span>", unsafe_allow_html=True)
-        st.divider()
-        st.caption("22 Tópicos Lexicon Sincronizados")
-
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('Timestamp', ascending=False)
+        
+        # SIDEBAR COM APRENDIZADO CRÍTICO
+        with st.sidebar:
+            st.markdown("### 📡 SITES ONLINE")
+            for s in RSS_SOURCES.keys():
+                st.markdown(f"• {s}: <span class='status-on'>ON</span>", unsafe_allow_html=True)
+            
+            st.divider()
+            st.markdown("### 🧠 TERMOS EM VALIDAÇÃO")
+            # Crivo Crítico: Só mostra se aparecer em mais de 1 fonte ou mais de 3 vezes
+            potential_terms = df[df['Tipo'] == 'Descoberta']
+            term_counts = potential_terms['Termo'].value_counts()
+            term_sources = potential_terms.groupby('Termo')['Fonte'].nunique()
+            
+            learned_list = []
+            for term, count in term_counts.items():
+                if count > 3 or term_sources[term] > 1:
+                    learned_list.append(term)
+                    st.markdown(f"<span class='new-term'>⚡ {term.upper()}</span>", unsafe_allow_html=True)
+            
+            if not learned_list: st.caption("Nenhum termo relevante detectado ainda.")
+
+        # DASHBOARD CENTRAL
         net_alpha = df['Alpha'].sum()
         prob = 100 / (1 + np.exp(-0.08 * net_alpha))
 
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.title("TERMINAL QUANT V20")
-            st.write(f"Sincronismo Global: {len(RSS_SOURCES)} Fontes Ativas")
+            st.title("🛢️ QUANT TERMINAL V21")
+            st.write("Filtro Crítico de Aprendizado Ativo")
         with c2:
             st.metric("BIAS GLOBAL", f"{prob:.1f}%", f"{net_alpha:.2f} Alpha")
 
-        # HEATMAP CATEGORIAL (Share de Notícias)
-        st.subheader("Frequência por Categoria (%)")
-        cat_counts = df['Categoria'].value_counts(normalize=True).reset_index()
-        cat_counts.columns = ['Categoria', 'Share']
-        cat_counts['Percentual'] = (cat_counts['Share'] * 100).round(1).astype(str) + '%'
-        
-        fig = px.treemap(cat_counts, path=['Categoria'], values='Share', 
-                         color_discrete_sequence=['#112240', '#64FFDA'])
-        fig.update_traces(texttemplate="<b>%{label}</b><br>%{customdata[0]}", customdata=cat_counts[['Percentual']])
-        fig.update_layout(height=250, paper_bgcolor='rgba(0,0,0,0)', font={'color': "#FFFFFF", 'size': 16}, margin=dict(t=0, l=0, r=0, b=0))
+        st.subheader("📊 Narrativas por Categoria")
+        cat_df = df[df['Tipo'] == 'Consolidado']['Categoria'].value_counts(normalize=True).reset_index()
+        fig = px.treemap(cat_df, path=['Categoria'], values='proportion', color_discrete_sequence=['#112240', '#64FFDA'])
+        fig.update_layout(height=200, paper_bgcolor='rgba(0,0,0,0)', margin=dict(t=0, l=0, r=0, b=0))
         st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Fluxo")
+        st.subheader("📝 Fluxo de Notícias")
         st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Categoria', 'Termo', 'Sentimento']].head(30), use_container_width=True)
-    else:
-        st.info("Conectando aos terminais marinhos...")
 
 if __name__ == "__main__": main()
