@@ -12,20 +12,18 @@ import requests
 from datetime import datetime
 
 # --- DATABASE ---
-DB_FILE = "Oil_Station_V19.csv"
+DB_FILE = "Oil_Station_V20.csv"
 
-# --- STATUS DOS SITES ---
 RSS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
     "Investing": "https://www.investing.com/rss/news_11.rss",
     "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
     "EIA": "https://www.eia.gov/about/rss/todayinenergy.xml",
-    "gCaptain": "https://gcaptain.com/feed/",
-    "Bloomberg (Alt)": "https://www.bloomberg.com/feeds/bpol/mostread.xml"
+    "gCaptain": "https://gcaptain.com/feed/"
 }
 
-# --- 22 DADOS LEXICON (O CÉREBRO) ---
+# --- 22 DADOS LEXICON ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.5, 1, "Geopolítica (Conflito)"],
     r"sanction|embargo|ban|price cap|seizure|blockade": [8.5, 1, "Geopolítica (Sanções)"],
@@ -51,13 +49,12 @@ LEXICON_TOPICS = {
     r"contango|discount|storage play": [7.5, -1, "Estrutura (Bearish)"]
 }
 
-# --- MOTOR DE CAPTURA ---
 def news_monitor():
     while True:
         for source, url in RSS_SOURCES.items():
             try:
                 feed = feedparser.parse(url)
-                for entry in feed.entries[:10]:
+                for entry in feed.entries[:5]:
                     t_lower = entry.title.lower()
                     for pattern, params in LEXICON_TOPICS.items():
                         match = re.search(pattern, t_lower)
@@ -65,73 +62,72 @@ def news_monitor():
                             alpha = params[0] * params[1]
                             prob = 1 / (1 + np.exp(-0.5 * alpha))
                             sent = f"{prob*100:.1f}% COMPRA" if prob > 0.5 else f"{(1-prob)*100:.1f}% VENDA"
-                            
-                            data = {
-                                "Hora": datetime.now().strftime("%H:%M:%S"),
-                                "Fonte": source,
-                                "Manchete": entry.title[:100],
-                                "Categoria": params[2],
-                                "Termo": match.group(), # O que ele absorveu
-                                "Sentimento": sent,
-                                "Alpha": alpha,
-                                "Timestamp": datetime.now().isoformat()
-                            }
+                            data = {"Hora": datetime.now().strftime("%H:%M:%S"), "Fonte": source, "Manchete": entry.title[:100], "Categoria": params[2], "Termo": match.group(), "Sentimento": sent, "Alpha": alpha, "Timestamp": datetime.now().isoformat()}
                             pd.DataFrame([data]).to_csv(DB_FILE, mode='a', header=not os.path.exists(DB_FILE), index=False)
             except: pass
         time.sleep(60)
 
-# --- INTERFACE VISUAL ---
 def main():
-    st.set_page_config(page_title="V19 - FULL SPECTRUM", layout="wide")
+    st.set_page_config(page_title="V20 - TOTAL NAVY", layout="wide")
     
+    # CSS CORRIGIDO: Sidebar e Main em Navy puro
     st.markdown("""<style>
-        .stApp { background-color: #0A192F; }
+        .stApp, [data-testid="stSidebar"], .stSidebar { background-color: #0A192F !important; }
         * { color: #FFFFFF !important; }
-        div[data-testid="stDataFrame"] div { background-color: #112240 !important; }
-        div[data-testid="stDataFrame"] td { color: #FFFFFF !important; font-size: 13px !important; }
-        .status-on { color: #39FF14 !important; font-weight: bold; }
+        
+        /* Tabela e Widgets em Marinho */
+        div[data-testid="stDataFrame"] div, .stMetric, .stAlert { 
+            background-color: #112240 !important; 
+            border: 1px solid #1B2B48;
+        }
+        
+        /* Status Neon */
+        .status-on { color: #39FF14 !important; font-weight: bold; text-shadow: 0 0 5px #39FF14; }
+        .status-off { color: #FF3131 !important; font-weight: bold; }
+        
+        /* Remover bordas brancas da sidebar */
+        [data-testid="stSidebarNav"] { background-color: #0A192F !important; }
     </style>""", unsafe_allow_html=True)
 
     if 'monitor' not in st.session_state:
         threading.Thread(target=news_monitor, daemon=True).start()
         st.session_state['monitor'] = True
 
-    # SIDEBAR COM OS SITES
+    # SIDEBAR DARK NAVY
     with st.sidebar:
-        st.title("📡 TERMINAIS")
+        st.markdown("### TERMINAIS RSS")
         for s in RSS_SOURCES.keys():
             st.markdown(f"• {s}: <span class='status-on'>ONLINE</span>", unsafe_allow_html=True)
         st.divider()
-        st.write("22 Tópicos Lexicon Ativos")
+        st.caption("22 Tópicos Lexicon Sincronizados")
 
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE).drop_duplicates(subset=['Manchete']).sort_values('Timestamp', ascending=False)
-        
+        net_alpha = df['Alpha'].sum()
+        prob = 100 / (1 + np.exp(-0.08 * net_alpha))
+
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.title("OIL STATION")
-            st.write(f"Monitorando {len(RSS_SOURCES)} fontes com sensibilidade singular.")
+            st.title("TERMINAL QUANT V20")
+            st.write(f"Sincronismo Global: {len(RSS_SOURCES)} Fontes Ativas")
         with c2:
-            net_alpha = df['Alpha'].sum()
-            prob = 100 / (1 + np.exp(-0.08 * net_alpha))
-            st.metric("BIAS GLOBAL", f"{prob:.1f}%", f"{net_alpha:.2f} α")
+            st.metric("BIAS GLOBAL", f"{prob:.1f}%", f"{net_alpha:.2f} Alpha")
 
-        # HEATMAP SÓ CATEGORIAS (Como solicitado)
-        st.subheader("Share de Narrativas (Por Categoria)")
+        # HEATMAP CATEGORIAL (Share de Notícias)
+        st.subheader("Frequência por Categoria (%)")
         cat_counts = df['Categoria'].value_counts(normalize=True).reset_index()
         cat_counts.columns = ['Categoria', 'Share']
         cat_counts['Percentual'] = (cat_counts['Share'] * 100).round(1).astype(str) + '%'
         
         fig = px.treemap(cat_counts, path=['Categoria'], values='Share', 
-                         color_discrete_sequence=['#112240', '#1B2B48', '#64FFDA'])
+                         color_discrete_sequence=['#112240', '#64FFDA'])
         fig.update_traces(texttemplate="<b>%{label}</b><br>%{customdata[0]}", customdata=cat_counts[['Percentual']])
-        fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "#FFFFFF", 'size': 16})
+        fig.update_layout(height=250, paper_bgcolor='rgba(0,0,0,0)', font={'color': "#FFFFFF", 'size': 16}, margin=dict(t=0, l=0, r=0, b=0))
         st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Fluxo de Inteligência")
-        st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Categoria', 'Termo', 'Sentimento']].head(25), use_container_width=True)
+        st.subheader("Fluxo")
+        st.dataframe(df[['Hora', 'Fonte', 'Manchete', 'Categoria', 'Termo', 'Sentimento']].head(30), use_container_width=True)
     else:
-        st.info("Conectando aos terminais...")
+        st.info("Conectando aos terminais marinhos...")
 
 if __name__ == "__main__": main()
-
