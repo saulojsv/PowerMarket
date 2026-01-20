@@ -13,7 +13,7 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO DE PÁGINA ---
-st.set_page_config(page_title="QUANT V54 | FULL LEXICON", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v54_refresh_full")
 
 # Arquivos de Dados
@@ -125,3 +125,4 @@ def main():
         st.table(lex_df)
 
 if __name__ == "__main__": main()
+
