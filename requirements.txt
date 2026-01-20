@@ -1,0 +1,7 @@
+feedparser
+pandas
+openpyxl
+streamlit
+streamlit-autorefresh
+plotly
+numpy
