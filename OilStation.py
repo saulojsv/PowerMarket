@@ -6,11 +6,24 @@ import json
 import streamlit as st
 import plotly.graph_objects as go
 import yfinance as yf
-from google import genai
+from google import genai 
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 from collections import Counter
 
+# --- 1. CONFIGURAÇÃO IA (NOVA SDK 2026) ---
+client = genai.Client(api_key="AIzaSyAAXdfAPosCN8-ezvekHhR6mO2dVLotT9A")
+
+def get_ai_insight(headlines, ica):
+    try:
+        # Nova sintaxe para o Gemini 2.0
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=f"Analise estas manchetes: {headlines}. ICA em {ica:.2f}. Resumo de 1 frase para trader XTIUSD."
+        )
+        return response.text
+    except Exception as e:
+        return "IA em calibração ou limite atingido."
 # --- CONFIGURAÇÃO IA (GEMINI FREE) ---
 # Substitua pela sua chave API do Google AI Studio
 genai.configure(api_key="SUA_CHAVE_GEMINI_AQUI")
@@ -232,4 +245,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
