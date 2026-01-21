@@ -50,14 +50,14 @@ st.markdown("""
     .neg-score { color: #FF4B4B; font-weight: bold; }
     a { color: #00FFC8 !important; text-decoration: none; font-size: 10px; font-weight: 700; border: 1px solid #00FFC8; padding: 2px 5px; border-radius: 3px; }
     
-    /* Estilo para a Aba de Aprendizado */
-    .learned-box { border: 1px solid #334155; padding: 15px; border-radius: 8px; margin-bottom: 10px; background: #0F172A; }
+    .learned-box { border: 1px solid #334155; padding: 15px; border-radius: 8px; margin-bottom: 5px; background: #0F172A; }
     .learned-term { color: #FACC15; font-weight: bold; font-family: monospace; font-size: 14px; }
-    .learned-count { color: #94A3B8; font-size: 12px; float: right; }
+    .learned-count { color: #94A3B8; font-size: 11px; float: right; }
+    .sentiment-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. BASE DE DADOS (20 SITES / 22 LEXICONS MANTIDOS) ---
+# --- 2. FONTES E LÉXICOS ESTÁTICOS ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -106,62 +106,50 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
 
-# --- 3. MÓDULO DE APRENDIZADO E MEMÓRIA (NOVO) ---
+# --- 3. GESTÃO DE MEMÓRIA E LÉXICOS APRENDIDOS ---
 MEMORY_FILE = "brain_memory.json"
+VERIFIED_FILE = "verified_lexicons.json"
 STOPWORDS = {'the', 'a', 'an', 'of', 'to', 'in', 'and', 'is', 'for', 'on', 'at', 'by', 'with', 'from', 'that', 'it', 'as', 'are', 'be', 'this', 'will', 'has', 'have', 'but', 'not', 'up', 'down', 'its', 'their', 'prices', 'oil', 'crude'}
 
-def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, 'r') as f:
+def load_json(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
             return json.load(f)
     return {}
 
-def save_memory(memory_data):
-    with open(MEMORY_FILE, 'w') as f:
-        json.dump(memory_data, f, indent=4)
+def save_json(filepath, data):
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=4)
 
-def learn_patterns(text, category, current_memory):
-    """
-    Extrai Bigrams e Trigrams do texto e associa à categoria detectada.
-    """
+def learn_patterns(text, category, score, current_memory):
     text = text.lower()
-    text = re.sub(r'[^a-z\s-]', '', text) # Limpeza
+    text = re.sub(r'[^a-z\s-]', '', text)
     tokens = text.split()
     
-    # Se a categoria não existe na memória, cria
     if category not in current_memory:
         current_memory[category] = {}
     
-    # Gera N-Grams (2 e 3 palavras)
     ngrams = []
-    # Bigrams
-    if len(tokens) >= 2:
-        ngrams.extend([' '.join(tokens[i:i+2]) for i in range(len(tokens)-1)])
-    # Trigrams
-    if len(tokens) >= 3:
-        ngrams.extend([' '.join(tokens[i:i+3]) for i in range(len(tokens)-2)])
+    if len(tokens) >= 2: ngrams.extend([' '.join(tokens[i:i+2]) for i in range(len(tokens)-1)])
+    if len(tokens) >= 3: ngrams.extend([' '.join(tokens[i:i+3]) for i in range(len(tokens)-2)])
         
     for phrase in ngrams:
-        # Filtra frases que só contêm stopwords
-        words = set(phrase.split())
-        if words.issubset(STOPWORDS):
-            continue
-            
-        # Incrementa contador
-        if phrase in current_memory[category]:
-            current_memory[category][phrase] += 1
-        else:
-            current_memory[category][phrase] = 1
+        if set(phrase.split()).issubset(STOPWORDS): continue
+        
+        if phrase not in current_memory[category]:
+            current_memory[category][phrase] = {"count": 0, "sentiment_sum": 0.0}
+        
+        current_memory[category][phrase]["count"] += 1
+        current_memory[category][phrase]["sentiment_sum"] += score
             
     return current_memory
 
-# --- 4. MOTOR DE INTELIGÊNCIA E FETCH ---
+# --- 4. PROCESSAMENTO ---
 def fetch_filtered_news():
     news_data = []
     DB_FILE = "Oil_Station_V54_Master.csv"
-    
-    # Carrega memória de aprendizado
-    brain_memory = load_memory()
+    brain_memory = load_json(MEMORY_FILE)
+    verified_lex = load_json(VERIFIED_FILE)
     memory_updated = False
     
     for name, url in RSS_SOURCES.items():
@@ -171,15 +159,21 @@ def fetch_filtered_news():
                 score, cat = 0.0, None
                 title_low = entry.title.lower()
                 
-                # Verifica match com os 22 Léxicos Originais
+                # 1. Checa Léxicos Estáticos (22 originais)
                 for patt, (w, d, c) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         score = float(w * d)
-                        cat = c # Categoria identificada
+                        cat = c
                         break
                 
+                # 2. Checa Léxicos Verificados (Aprendidos e aprovados)
+                for v_cat, v_phrases in verified_lex.items():
+                    for phrase, weight in v_phrases.items():
+                        if phrase in title_low:
+                            score += weight
+                            if not cat: cat = v_cat
+
                 if score != 0:
-                    # 1. Adiciona à lista de notícias (Processo Original)
                     news_data.append({
                         "Data": datetime.now().strftime("%H:%M:%S"),
                         "Fonte": name,
@@ -188,150 +182,100 @@ def fetch_filtered_news():
                         "Cat": cat,
                         "Link": entry.link
                     })
-                    
-                    # 2. Processo de Aprendizado (NOVO)
-                    # Se identificamos uma categoria, aprendemos as expressões dessa manchete
-                    brain_memory = learn_patterns(entry.title, cat, brain_memory)
-                    memory_updated = True
-
-        except:
-            continue
+                    if cat:
+                        brain_memory = learn_patterns(entry.title, cat, score, brain_memory)
+                        memory_updated = True
+        except: continue
             
-    # Salva Memória de Aprendizado se houve novidade
-    if memory_updated:
-        save_memory(brain_memory)
-
-    # Salva CSV de Notícias (Processo Original)
+    if memory_updated: save_json(MEMORY_FILE, brain_memory)
     if news_data:
         df_new = pd.DataFrame(news_data)
         if os.path.exists(DB_FILE):
             df_old = pd.read_csv(DB_FILE)
-            df_final = pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300)
-            df_final.to_csv(DB_FILE, index=False)
-        else:
-            df_new.to_csv(DB_FILE, index=False)
+            pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300).to_csv(DB_FILE, index=False)
+        else: df_new.to_csv(DB_FILE, index=False)
 
 @st.cache_data(ttl=60)
 def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
-    prices = {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}
-    wti_momentum = 0.0
-    z_score = 0.0
+    prices, momentum, z_score = {"WTI":0.0, "BRENT":0.0, "DXY":0.0}, 0.0, 0.0
     try:
         data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, ignore_tz=True)
-        if not data.empty and 'Close' in data:
+        if not data.empty:
             closes = data['Close'].ffill()
-            for k, v in tickers.items():
-                if v in closes.columns:
-                    prices[k] = float(closes[v].iloc[-1])
-            
-            if "BZ=F" in closes.columns and "CL=F" in closes.columns:
-                spread_series = closes["BZ=F"] - closes["CL=F"]
-                mean_spread = spread_series.mean()
-                std_spread = spread_series.std()
-                z_score = (spread_series.iloc[-1] - mean_spread) / std_spread
-                
-                wti_series = closes["CL=F"]
-                wti_momentum = float(wti_series.pct_change(fill_method=None).iloc[-1]) if len(wti_series) > 1 else 0.0
-    except:
-        pass 
-    return prices, wti_momentum, z_score
+            for k, v in tickers.items(): prices[k] = float(closes[v].iloc[-1])
+            spread = closes["BZ=F"] - closes["CL=F"]
+            z_score = (spread.iloc[-1] - spread.mean()) / spread.std()
+            momentum = float(closes["CL=F"].pct_change().iloc[-1])
+    except: pass
+    return prices, momentum, z_score
 
-# --- 5. RENDERIZAÇÃO E ABAS ---
 def main():
-    fetch_filtered_news() # Executa fetch e aprendizado
+    fetch_filtered_news()
     prices, momentum, z_score = get_market_metrics()
-    
-    DB_FILE = "Oil_Station_V54_Master.csv"
-    df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
+    df_news = pd.read_csv("Oil_Station_V54_Master.csv") if os.path.exists("Oil_Station_V54_Master.csv") else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
 
-    # Criação das Abas
-    tab_dashboard, tab_brain = st.tabs(["📊 MONITOR DE ARBITRAGEM", "🧠 IA LEARNING CENTER"])
+    tab_dash, tab_brain = st.tabs(["📊 MONITOR DE ARBITRAGEM", "🧠 IA LEARNING CENTER"])
 
-    # --- CONTEÚDO DA ABA 1: MONITOR ORIGINAL ---
-    with tab_dashboard:
-        # LÓGICA DE ARBITRAGEM (MANTIDA)
-        if avg_alpha > 6.0 and z_score < -1.5:
-            arb_status, arb_color = "ARBITRAGEM: COMPRA AGRESSIVA (ALPHA ALTO + SPREAD BAIXO)", "#00FFC8"
-        elif avg_alpha < -6.0 and z_score > 1.5:
-            arb_status, arb_color = "ARBITRAGEM: VENDA AGRESSIVA (ALPHA BAIXO + SPREAD ALTO)", "#FF4B4B"
-        elif abs(z_score) > 2.0:
-            arb_status, arb_color = f"ALERTA DE ARBITRAGEM: REVERSÃO DE SPREAD (Z-SCORE: {z_score:.2f})", "#EAB308"
-        else:
-            arb_status, arb_color = "MERCADO EM EQUILÍBRIO DE ARBITRAGEM", "#94A3B8"
+    with tab_dash:
+        if avg_alpha > 6.0 and z_score < -1.5: arb_s, arb_c = "COMPRA AGRESSIVA", "#00FFC8"
+        elif avg_alpha < -6.0 and z_score > 1.5: arb_s, arb_c = "VENDA AGRESSIVA", "#FF4B4B"
+        else: arb_s, arb_c = "EQUILÍBRIO", "#94A3B8"
 
-        st.markdown(f"""
-            <div class="arbitrage-monitor" style="border-color: {arb_color}; color: {arb_color};">
-                <small>SISTEMA DE ARBITRAGEM ESTATÍSTICA & SENTIMENTO</small><br>
-                <strong style="font-size: 20px;">{arb_status}</strong>
-            </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown(f'<div class="arbitrage-monitor" style="border-color:{arb_c}; color:{arb_c};"><strong>{arb_s}</strong></div>', unsafe_allow_html=True)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}", f"{momentum:.2%}")
-        spread = prices['BRENT'] - prices['WTI']
-        c2.metric("SPREAD B/W (Z-SCORE)", f"$ {spread:.2f}", f"Z: {z_score:.2f}")
-        c3.metric("IA ALPHA SCORE", f"{avg_alpha:.2f}")
-        c4.metric("DXY INDEX", f"$ {prices['DXY']:.2f}")
-
-        st.markdown("---")
+        c1.metric("WTI", f"$ {prices['WTI']:.2f}", f"{momentum:.2%}")
+        c2.metric("Z-SCORE", f"{z_score:.2f}")
+        c3.metric("ALPHA", f"{avg_alpha:.2f}")
+        c4.metric("DXY", f"{prices['DXY']:.2f}")
         
-        col_gauge, col_table = st.columns([1, 2])
-        
-        with col_gauge:
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number", value=avg_alpha,
-                title={'text': "SENTIMENTO ALPHA", 'font': {'size': 14}},
-                gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_color}}
-            ))
-            fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=50, b=20))
-            st.plotly_chart(fig, width='stretch')
-
-        with col_table:
+        col_g, col_t = st.columns([1, 2])
+        with col_g:
+            fig = go.Figure(go.Indicator(mode="gauge+number", value=avg_alpha, gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_c}}))
+            fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            st.plotly_chart(fig, use_container_width=True)
+        with col_t:
             if not df_news.empty:
-                df_display = df_news.copy()
-                def color_logic(v):
-                    color = "pos-score" if v > 0 else "neg-score"
-                    return f'<span class="{color}">{v}</span>'
-                df_display['Alpha'] = df_display['Alpha'].apply(color_logic)
-                df_display['Link'] = df_display['Link'].apply(lambda x: f'<a href="{x}" target="_blank">DETALHES</a>')
-                table_html = df_display[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False)
-                st.markdown(f'<div class="scroll-container">{table_html}</div>', unsafe_allow_html=True)
+                df_d = df_news.copy()
+                df_d['Alpha'] = df_d['Alpha'].apply(lambda v: f'<span class="{"pos-score" if v>0 else "neg-score"}">{v}</span>')
+                st.markdown(f'<div class="scroll-container">{df_d[["Data", "Fonte", "Manchete", "Alpha"]].to_html(escape=False, index=False)}</div>', unsafe_allow_html=True)
 
-    # --- CONTEÚDO DA ABA 2: APRENDIZADO DA IA (NOVO) ---
     with tab_brain:
         st.header("Novas Expressões Detectadas (N-Grams)")
-        st.caption("Abaixo estão os padrões compostos que a IA identificou automaticamente lendo as notícias e correlacionando com seus 22 léxicos base. Use isso para aprimorar seus pesos.")
+        memory = load_json(MEMORY_FILE)
+        verified = load_json(VERIFIED_FILE)
         
-        memory_data = load_memory()
-        
-        if not memory_data:
-            st.info("A IA ainda não aprendeu padrões suficientes. Aguarde o processamento de novas notícias.")
+        if not memory: st.info("Processando novos padrões...")
         else:
-            # Organiza visualmente em colunas
             cols = st.columns(3)
-            col_idx = 0
-            
-            for category, expressions in memory_data.items():
-                # Filtra apenas expressões que apareceram mais de 1 vez para limpar ruído
-                valid_exprs = {k: v for k, v in expressions.items() if v > 1}
-                if not valid_exprs:
-                    continue
+            for idx, (cat, phrases) in enumerate(memory.items()):
+                valid = {k: v for k, v in phrases.items() if v['count'] >= 3 and k not in verified.get(cat, {})}
+                if not valid: continue
                 
-                # Ordena pelas mais frequentes
-                sorted_exprs = sorted(valid_exprs.items(), key=lambda x: x[1], reverse=True)[:10]
-                
-                with cols[col_idx % 3]:
-                    st.markdown(f"#### 📂 {category}")
-                    for term, count in sorted_exprs:
+                with cols[idx % 3]:
+                    st.markdown(f"#### 📂 {cat}")
+                    for phrase, data in sorted(valid.items(), key=lambda x: x[1]['count'], reverse=True)[:8]:
+                        # Cálculo automático de sentimento sugerido
+                        avg_sent = data['sentiment_sum'] / data['count']
+                        sent_label = "Positivo" if avg_sent > 0 else "Negativo"
+                        sent_color = "#00FFC8" if avg_sent > 0 else "#FF4B4B"
+                        
                         st.markdown(f"""
-                        <div class="learned-box">
-                            <span class="learned-term">"{term}"</span>
-                            <span class="learned-count">Freq: {count}</span>
-                        </div>
+                            <div class="learned-box">
+                                <span class="learned-term">"{phrase}"</span>
+                                <span class="learned-count">Freq: {data['count']}</span><br>
+                                <span class="sentiment-tag" style="background:{sent_color}33; color:{sent_color};">Sugerido: {sent_label}</span>
+                            </div>
                         """, unsafe_allow_html=True)
-                col_idx += 1
+                        
+                        c_w, c_b = st.columns([1, 1])
+                        w_input = c_w.number_input("Peso", value=round(avg_sent, 1), key=f"w_{phrase}")
+                        if c_b.button("Aprovar", key=f"b_{phrase}"):
+                            if cat not in verified: verified[cat] = {}
+                            verified[cat][phrase] = w_input
+                            save_json(VERIFIED_FILE, verified)
+                            st.rerun()
 
 if __name__ == "__main__":
     main()
