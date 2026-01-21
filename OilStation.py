@@ -6,7 +6,7 @@ import json
 import streamlit as st
 import plotly.graph_objects as go
 import yfinance as yf
-import google.generativeai as genai
+from google import genai
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 from collections import Counter
@@ -232,3 +232,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
