@@ -65,7 +65,6 @@ st.markdown("""
     .learned-count { color: #94A3B8; font-size: 11px; float: right; }
     .sentiment-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; }
 
-    /* Estilização Manual dos Botões de Ação */
     div.stButton > button {
         width: 100%;
         border-radius: 4px;
@@ -79,7 +78,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LÉXICOS E FONTES ---
+# --- 2. CONFIGURAÇÕES DE ARQUIVOS ---
+MEMORY_FILE = "brain_memory.json"
+VERIFIED_FILE = "verified_lexicons.json"
+MARKET_CACHE_FILE = "market_last_prices.json"
+STOPWORDS = {'the', 'a', 'an', 'of', 'to', 'in', 'and', 'is', 'for', 'on', 'at', 'by', 'with', 'from', 'that', 'it', 'as', 'are', 'be', 'this', 'will', 'has', 'have', 'but', 'not', 'up', 'down', 'its', 'their', 'prices', 'oil', 'crude'}
+
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -127,10 +131,6 @@ LEXICON_TOPICS = {
     r"volatility|vix|contango|backwardation": [6.2, 1, "Term Structure"],
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
-
-MEMORY_FILE = "brain_memory.json"
-VERIFIED_FILE = "verified_lexicons.json"
-STOPWORDS = {'the', 'a', 'an', 'of', 'to', 'in', 'and', 'is', 'for', 'on', 'at', 'by', 'with', 'from', 'that', 'it', 'as', 'are', 'be', 'this', 'will', 'has', 'have', 'but', 'not', 'up', 'down', 'its', 'their', 'prices', 'oil', 'crude'}
 
 def load_json(path):
     if os.path.exists(path):
@@ -200,10 +200,16 @@ def fetch_filtered_news():
             pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300).to_csv(DB_FILE, index=False)
         else: df_new.to_csv(DB_FILE, index=False)
 
-@st.cache_data(ttl=120) 
+@st.cache_data(ttl=120)
 def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
-    prices, momentum, z_score = {"WTI":0.0, "BRENT":0.0, "DXY":0.0}, 0.0, 0.0
+    
+    # Fallback/Cache Inicial
+    cached = load_json(MARKET_CACHE_FILE)
+    prices = cached.get("prices", {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0})
+    momentum = cached.get("momentum", 0.0)
+    z_score = cached.get("z_score", 0.0)
+
     try:
         data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, ignore_tz=True)
         if not data.empty and 'Close' in data:
@@ -214,7 +220,12 @@ def get_market_metrics():
                 spread = closes["BZ=F"] - closes["CL=F"]
                 z_score = (spread.iloc[-1] - spread.mean()) / spread.std()
                 momentum = float(closes["CL=F"].pct_change().iloc[-1])
-    except: pass
+            
+            # Salva o sucesso no cache
+            save_json(MARKET_CACHE_FILE, {"prices": prices, "momentum": momentum, "z_score": z_score})
+    except Exception as e:
+        st.toast(f"Usando Dados em Cache: API Limitada", icon="⚠️")
+        
     return prices, momentum, z_score
 
 def main():
@@ -276,7 +287,6 @@ def main():
                             </div>
                         """, unsafe_allow_html=True)
                         
-                        # Controle de Peso e Botões Lado a Lado
                         w_input = st.number_input("Peso", value=round(avg_sent, 1), key=f"w_{cat}_{phrase}", label_visibility="collapsed")
                         
                         b_col1, b_col2 = st.columns(2)
