@@ -3,5 +3,5 @@ feedparser
 streamlit
 plotly
 yfinance
-google-generativeai
+google-genai
 streamlit-autorefresh
