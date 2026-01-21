@@ -11,6 +11,7 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÃO IA & ESTÉTICA ---
+# Chave integrada conforme sua solicitação
 client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 st.set_page_config(page_title="TERMINAL XTIUSD - V80 HYBRID", layout="wide", initial_sidebar_state="collapsed")
@@ -88,15 +89,19 @@ def save_json(p, d):
     with open(p, 'w') as f: json.dump(d, f, indent=4)
 
 def get_ai_val(title):
-    """Auditoria Independente: Lê a notícia e extrai termos sem influência do Lexicon."""
+    """Auditoria Independente com prompt otimizado para reduzir divergências."""
     try:
         prompt = f"""
-        SISTEMA DE AUDITORIA XTIUSD:
+        Como especialista em commodities, analise o impacto para o Petróleo (WTI):
         Notícia: '{title}'
-        TAREFAS:
-        1. Classifique o viés: 1 (Alta), -1 (Baixa) ou 0 (Neutro).
-        2. Extraia EXATAMENTE 2 expressões técnicas curtas que justificam sua decisão.
+        
+        Considere: 
+        - Decisões do Fed/Economia Forte/Cortes de Juros = Alta (+1)
+        - Tensões Geopolíticas/Guerra/Ataques = Alta (+1)
+        - Aumento de Estoques/Recessão/China fraca = Baixa (-1)
+        
         Responda APENAS em JSON: {{"alpha": valor, "termos": ["termo1", "termo2"]}}
+        Alpha deve ser 1, -1 ou 0.
         """
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         clean_res = response.text.replace('```json', '').replace('```', '').strip()
@@ -128,9 +133,9 @@ def fetch_news():
                 ai_dir = ai_data.get("alpha", 0)
                 termos_sugeridos = ai_data.get("termos", [])
 
-                # Consenso: IA e Lexicon precisam concordar
-                consenso = (ai_dir == lex_dir) and (lex_match_count >= MIN_LEX_TERMS or abs(lex_score) >= 9.5)
-                status = "CONFLUÊNCIA" if consenso else "VETADO/DIVERGENTE"
+                # Consenso ajustado para ser mais flexível se o impacto for alto
+                consenso = (ai_dir == lex_dir) and (lex_match_count >= MIN_LEX_TERMS or abs(lex_score) >= 9.0)
+                status = "CONFLUÊNCIA" if consenso else "DIVERGÊNCIA"
                 final_alpha = lex_score if consenso else 0.0
 
                 if ai_dir != 0:
@@ -150,18 +155,25 @@ def fetch_news():
     
     save_json(MEMORY_FILE, memory)
     save_json(CROSS_VAL_FILE, logs[:100])
-    if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_V80_Hybrid.csv", index=False)
+    if news_list: 
+        pd.DataFrame(news_list).to_csv("Oil_Station_V80_Hybrid.csv", index=False)
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=900) # Cache de 15 min para evitar YFRateLimitError
 def get_market_metrics():
     try:
         data = yf.download(["CL=F", "USDCAD=X"], period="5d", interval="15m", progress=False)
-        p_wti = data['Close']['CL=F'].iloc[-1]
-        p_cad = data['Close']['USDCAD=X'].iloc[-1]
+        if data.empty or 'CL=F' not in data['Close'] or data['Close']['CL=F'].isnull().all():
+            return {"WTI": 0.0, "USDCAD": 1.37, "Z": 0.0, "status": "Rate Limited"}
+            
+        p_wti = data['Close']['CL=F'].dropna().iloc[-1]
+        p_cad = data['Close']['USDCAD=X'].dropna().iloc[-1]
+        
         ratio = data['Close']['CL=F'] / data['Close']['USDCAD=X']
-        z = (ratio.iloc[-1] - ratio.mean()) / ratio.std()
-        return {"WTI": p_wti, "USDCAD": p_cad, "Z": float(z), "status": "Online"}
-    except: return {"WTI": 75.0, "USDCAD": 1.35, "Z": 0.0, "status": "Offline"}
+        z = (ratio.iloc[-1] - ratio.mean()) / ratio.std() if ratio.std() != 0 else 0.0
+        
+        return {"WTI": float(p_wti), "USDCAD": float(p_cad), "Z": float(z), "status": "Online"}
+    except: 
+        return {"WTI": 0.0, "USDCAD": 1.37, "Z": 0.0, "status": "Offline"}
 
 # --- 5. INTERFACE ---
 def main():
@@ -169,7 +181,10 @@ def main():
     mkt = get_market_metrics()
     df_news = pd.read_csv("Oil_Station_V80_Hybrid.csv") if os.path.exists("Oil_Station_V80_Hybrid.csv") else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
-    ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
+    
+    # Cálculo do ICA Score com proteção contra NaN
+    z_val = mkt['Z'] if not pd.isna(mkt['Z']) else 0.0
+    ica_val = (avg_alpha + (z_val * -5)) / 2
 
     st.markdown(f'<div class="live-status"><div style="font-weight:800; color:#00FFC8;">TERMINAL XTIUSD | QUANT V80 HYBRID</div><div style="font-family:monospace;">{datetime.now().strftime("%H:%M:%S")} <span style="color:#00FFC8;">● {mkt["status"]}</span></div></div>', unsafe_allow_html=True)
 
@@ -179,7 +194,7 @@ def main():
         color = "#00FFC8" if ica_val > 4 else "#FF4B4B" if ica_val < -4 else "#94A3B8"
         st.markdown(f'<div class="arbitrage-monitor" style="border-color:{color}; color:{color};"><strong>ICA SCORE: {ica_val:.2f}</strong></div>', unsafe_allow_html=True)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
+        c1.metric("WTI", f"$ {mkt['WTI']:.2f}" if mkt['WTI'] > 0 else "LIMIT")
         c2.metric("USDCAD", f"{mkt['USDCAD']:.4f}")
         c3.metric("Z-SCORE", f"{mkt['Z']:.2f}")
         c4.metric("ALPHA", f"{avg_alpha:.2f}")
@@ -188,6 +203,8 @@ def main():
             df_disp = df_news.copy()
             df_disp['Status'] = df_disp['Status'].apply(lambda x: f'<span class="match-tag">{x}</span>' if x=="CONFLUÊNCIA" else f'<span class="veto-tag">{x}</span>')
             st.markdown(f'<div class="scroll-container">{df_disp[["Data", "Fonte", "Manchete", "Alpha", "Status"]].to_html(escape=False, index=False)}</div>', unsafe_allow_html=True)
+        else:
+            st.info("Aguardando confluência de notícias para atualizar o Dashboard.")
 
     with tab2:
         st.subheader("🧠 Centro de Aprendizado Híbrido")
