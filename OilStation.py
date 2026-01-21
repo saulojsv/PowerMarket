@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 from collections import Counter
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
-st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TERMINAL XTIUSD - ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v69_refresh")
 
 st.markdown("""
@@ -64,10 +64,22 @@ st.markdown("""
     .learned-term { color: #FACC15; font-weight: bold; font-family: monospace; font-size: 14px; }
     .learned-count { color: #94A3B8; font-size: 11px; float: right; }
     .sentiment-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; }
+
+    /* Estilização Manual dos Botões de Ação */
+    div.stButton > button {
+        width: 100%;
+        border-radius: 4px;
+        font-weight: bold;
+        border: none;
+        height: 32px;
+        font-size: 11px;
+    }
+    .btn-approve button { background-color: #00FFC8 !important; color: #050A12 !important; }
+    .btn-reject button { background-color: #FF4B4B !important; color: #FFFFFF !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LÉXICOS E FONTES (MANTIDOS) ---
+# --- 2. LÉXICOS E FONTES ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -143,7 +155,6 @@ def learn_patterns(text, category, score, current_memory):
         current_memory[category][ph]["sentiment_sum"] += score
     return current_memory
 
-# --- 4. MOTOR DE FETCH ---
 def fetch_filtered_news():
     news_data = []
     DB_FILE = "Oil_Station_V54_Master.csv"
@@ -243,6 +254,7 @@ def main():
         st.header("Novas Expressões Detectadas (N-Grams)")
         memory = load_json(MEMORY_FILE)
         verified = load_json(VERIFIED_FILE)
+        
         if not memory: st.info("Processando padrões...")
         else:
             cols = st.columns(3)
@@ -255,6 +267,7 @@ def main():
                         avg_sent = data['sentiment_sum'] / data['count']
                         sent_label = "Positivo" if avg_sent > 0 else "Negativo"
                         sent_color = "#00FFC8" if avg_sent > 0 else "#FF4B4B"
+                        
                         st.markdown(f"""
                             <div class="learned-box">
                                 <span class="learned-term">"{phrase}"</span>
@@ -263,14 +276,27 @@ def main():
                             </div>
                         """, unsafe_allow_html=True)
                         
-                        # CORREÇÃO DE CHAVE DUPLICADA: Adicionando a categoria ao ID
-                        c_w, c_b = st.columns([1, 1])
-                        w_input = c_w.number_input("Peso", value=round(avg_sent, 1), key=f"w_{cat}_{phrase}")
-                        if c_b.button("Aprovar", key=f"b_{cat}_{phrase}"):
-                            if cat not in verified: verified[cat] = {}
-                            verified[cat][phrase] = w_input
-                            save_json(VERIFIED_FILE, verified)
-                            st.rerun()
+                        # Controle de Peso e Botões Lado a Lado
+                        w_input = st.number_input("Peso", value=round(avg_sent, 1), key=f"w_{cat}_{phrase}", label_visibility="collapsed")
+                        
+                        b_col1, b_col2 = st.columns(2)
+                        with b_col1:
+                            st.markdown('<div class="btn-approve">', unsafe_allow_html=True)
+                            if st.button("APROVAR", key=f"app_{cat}_{phrase}"):
+                                if cat not in verified: verified[cat] = {}
+                                verified[cat][phrase] = w_input
+                                save_json(VERIFIED_FILE, verified)
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        with b_col2:
+                            st.markdown('<div class="btn-reject">', unsafe_allow_html=True)
+                            if st.button("REPROVAR", key=f"rej_{cat}_{phrase}"):
+                                if phrase in memory[cat]:
+                                    del memory[cat][phrase]
+                                    save_json(MEMORY_FILE, memory)
+                                    st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
