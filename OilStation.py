@@ -13,7 +13,7 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. CONFIGURAÇÃO IA & ESTÉTICA ---
 client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
-st.set_page_config(page_title="TERMINAL XTIUSD - V80 HYBRID", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=300000, key="v80_refresh") 
 
 MEMORY_FILE = "brain_memory.json"
@@ -28,10 +28,12 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; }
     [data-testid="stMetricLabel"] { font-size: 10px !important; color: #94A3B8 !important; text-transform: uppercase; }
     .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(30, 41, 59, 0.3); border-bottom: 2px solid #00FFC8; margin-bottom: 20px; }
-    .arbitrage-monitor { padding: 20px; border-radius: 5px; border: 1px solid #1E293B; background: rgba(0, 0, 0, 0.4); margin-bottom: 20px; text-align: center; }
+    .arbitrage-monitor { padding: 15px; border-radius: 5px; border: 1px solid #1E293B; background: rgba(0, 0, 0, 0.4); margin-bottom: 20px; text-align: center; }
     .scroll-container { height: 480px; overflow-y: auto; border: 1px solid rgba(30, 41, 59, 0.5); background: rgba(0, 0, 0, 0.2); }
     .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+    .learned-box { border: 1px solid #1E293B; padding: 12px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); margin-bottom: 10px; }
+    .term-text { color: #FACC15; font-weight: bold; font-family: monospace; font-size: 16px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -60,16 +62,18 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
-        prompt = f"Analise impacto WTI (1, -1, 0) para: '{title}'. Responda JSON: {{\"alpha\": v, \"termos\": []}}"
+        # Prompt ajustado para capturar termos para a aba de treino
+        prompt = f"Analise impacto Petróleo WTI (1, -1 ou 0) e extraia 2 termos técnicos: '{title}'. Responda estritamente em JSON: {{\"alpha\": v, \"termos\": [\"t1\", \"t2\"]}}"
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         res = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(res)
     except: return {"alpha": 0, "termos": []}
 
-# --- 4. ENGINE DE NOTÍCIAS (CONFLUÊNCIA FLEXÍVEL) ---
+# --- 4. ENGINE DE NOTÍCIAS ---
 def fetch_news():
     news_list = []
     logs = load_json(CROSS_VAL_FILE)
+    memory = load_json(MEMORY_FILE)
     sources = {
         "OilPrice": "https://oilprice.com/rss/main",
         "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
@@ -89,8 +93,13 @@ def fetch_news():
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
+                # Alimentar memória de treino com sugestões da IA
+                for t in ai_data.get("termos", []):
+                    t = t.lower()
+                    if t not in memory: memory[t] = {"count": 1, "alpha": ai_dir}
+                    else: memory[t]["count"] += 1
+                
                 consenso = (ai_dir == lex_dir)
-                # Aceita se houver consenso OU impacto léxico extremo
                 if consenso or abs(lex_score) >= 9.5:
                     news_list.append({
                         "Data": datetime.now().strftime("%H:%M"),
@@ -102,31 +111,30 @@ def fetch_news():
                 logs.insert(0, {"Data": datetime.now().strftime("%H:%M"), "Manchete": entry.title[:60], "Lex": lex_dir, "AI": ai_dir, "Result": "OK" if consenso else "DIV"})
         except: continue
     
+    save_json(MEMORY_FILE, memory)
     save_json(CROSS_VAL_FILE, logs[:50])
     if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_V80_Hybrid.csv", index=False)
 
-# --- 5. MÉTRICAS COM PROTEÇÃO CONTRA RATE LIMIT ---
-@st.cache_data(ttl=1200) # 20 minutos de cache para acalmar a API
+# --- 5. MÉTRICAS COM PROTEÇÃO ---
+@st.cache_data(ttl=1200)
 def get_market_metrics():
-    # Valores de segurança (fallback) caso o Yahoo bloqueie tudo
     fallback = {"WTI": 75.20, "CAD": 1.3800, "Z": 0.0, "status": "Cooldown Mode"}
     try:
         data = yf.download(["CL=F", "USDCAD=X"], period="2d", interval="15m", progress=False)
-        if data.empty or 'CL=F' not in data['Close']: 
-            return fallback
-        
+        if data.empty or 'CL=F' not in data['Close']: return fallback
         wti = float(data['Close']['CL=F'].dropna().iloc[-1])
         cad = float(data['Close']['USDCAD=X'].dropna().iloc[-1])
         ratio = data['Close']['CL=F'] / data['Close']['USDCAD=X']
         z = float((ratio.iloc[-1] - ratio.mean()) / ratio.std())
         return {"WTI": wti, "CAD": cad, "Z": z, "status": "Online"}
-    except:
-        return fallback
+    except: return fallback
 
 # --- 6. INTERFACE ---
 def main():
     fetch_news()
     mkt = get_market_metrics()
+    memory = load_json(MEMORY_FILE)
+    verified = load_json(VERIFIED_FILE)
     df_news = pd.read_csv("Oil_Station_V80_Hybrid.csv") if os.path.exists("Oil_Station_V80_Hybrid.csv") else pd.DataFrame()
     
     avg_alpha = df_news['Alpha'].mean() if not df_news.empty else 0.0
@@ -134,17 +142,52 @@ def main():
 
     st.markdown(f'<div class="live-status"><div style="font-weight:800; color:#00FFC8;">TERMINAL XTIUSD | QUANT V80</div><div>{datetime.now().strftime("%H:%M")} <span style="color:#00FFC8;">● {mkt["status"]}</span></div></div>', unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
-    c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
-    c3.metric("Z-SCORE", f"{mkt['Z']:.2f}")
-    c4.metric("ALPHA", f"{avg_alpha:.2f}")
+    tab1, tab2 = st.tabs(["📊 DASHBOARD", "🧠 IA TRAINING & LEXICONS"])
 
-    st.markdown(f'<div class="arbitrage-monitor"><strong>ICA SCORE: {ica_val:.2f}</strong></div>', unsafe_allow_html=True)
+    with tab1:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
+        c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
+        c3.metric("Z-SCORE", f"{mkt['Z']:.2f}")
+        c4.metric("ALPHA", f"{avg_alpha:.2f}")
 
-    if not df_news.empty:
-        df_disp = df_news.copy()
-        df_disp['Status'] = df_disp['Status'].apply(lambda x: f'<span class="match-tag">{x}</span>' if x=="CONFLUÊNCIA" else f'<span class="veto-tag">{x}</span>')
-        st.markdown(f'<div class="scroll-container">{df_disp[["Data", "Fonte", "Manchete", "Alpha", "Status"]].to_html(escape=False, index=False)}</div>', unsafe_allow_html=True)
+        col_gauge, col_news = st.columns([1, 2])
+
+        with col_gauge:
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number", value = ica_val,
+                title = {'text': "ICA SCORE", 'font': {'size': 18, 'color': "#00FFC8"}},
+                gauge = {
+                    'axis': {'range': [-10, 10], 'tickcolor': "white"},
+                    'bar': {'color': "#00FFC8"},
+                    'steps': [
+                        {'range': [-10, -3], 'color': '#450a0a'},
+                        {'range': [3, 10], 'color': '#064E3B'}],
+                }
+            ))
+            fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_news:
+            if not df_news.empty:
+                df_disp = df_news.copy()
+                df_disp['Status'] = df_disp['Status'].apply(lambda x: f'<span class="match-tag">{x}</span>' if x=="CONFLUÊNCIA" else f'<span class="veto-tag">{x}</span>')
+                st.markdown(f'<div class="scroll-container">{df_disp[["Data", "Fonte", "Manchete", "Alpha", "Status"]].to_html(escape=False, index=False)}</div>', unsafe_allow_html=True)
+
+    with tab2:
+        st.subheader("Sugestões de Treino (Aprendizado de Máquina)")
+        for term in list(memory.keys())[:15]:
+            with st.container():
+                ci, ca, cr = st.columns([3, 1, 1])
+                ci.markdown(f'<div class="learned-box">Termo: <span class="term-text">"{term.upper()}"</span> | Impacto: {memory[term]["alpha"]}</div>', unsafe_allow_html=True)
+                if ca.button("✅ Aprovar", key=f"a_{term}"):
+                    verified[term] = memory[term]["alpha"]
+                    del memory[term]
+                    save_json(VERIFIED_FILE, verified); save_json(MEMORY_FILE, memory)
+                    st.rerun()
+                if cr.button("❌ Rejeitar", key=f"r_{term}"):
+                    del memory[term]
+                    save_json(MEMORY_FILE, memory)
+                    st.rerun()
 
 if __name__ == "__main__": main()
