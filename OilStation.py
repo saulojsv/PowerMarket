@@ -11,9 +11,10 @@ from streamlit_autorefresh import st_autorefresh
 from collections import Counter
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
-st.set_page_config(page_title="TERMINAL XTIUSD - ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
-# Aumentado para 5 minutos para evitar bloqueios constantes de IP em 2026
-st_autorefresh(interval=300000, key="v70_refresh")
+st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
+
+# Atualização em tempo real a cada 1 minuto
+st_autorefresh(interval=60000, key="v75_realtime_sync") 
 
 st.markdown("""
     <style>
@@ -26,60 +27,32 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; }
     [data-testid="stMetricLabel"] { font-size: 10px !important; color: #94A3B8 !important; text-transform: uppercase; }
     
-    .arbitrage-monitor {
-        padding: 20px;
-        border-radius: 5px;
-        border: 1px solid #1E293B;
-        background: rgba(0, 0, 0, 0.4);
-        margin-bottom: 20px;
-        text-align: center;
+    .live-status {
+        display: flex; justify-content: space-between; align-items: center; 
+        padding: 10px; background: rgba(30, 41, 59, 0.3); 
+        border-bottom: 2px solid #00FFC8; margin-bottom: 20px;
     }
-
-    .scroll-container {
-        height: 480px;
-        overflow-y: auto;
-        border: 1px solid rgba(30, 41, 59, 0.5);
-        background: rgba(0, 0, 0, 0.2);
-    }
+    .arbitrage-monitor { padding: 20px; border-radius: 5px; border: 1px solid #1E293B; background: rgba(0, 0, 0, 0.4); margin-bottom: 20px; text-align: center; }
+    .scroll-container { height: 480px; overflow-y: auto; border: 1px solid rgba(30, 41, 59, 0.5); background: rgba(0, 0, 0, 0.2); }
     .scroll-container::-webkit-scrollbar { width: 4px; }
     .scroll-container::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 10px; }
-    
     table { width: 100%; border-collapse: collapse; }
     th { color: #94A3B8 !important; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid #1E293B; padding: 10px; position: sticky; top: 0; background: #050A12; z-index: 10; }
     td { font-size: 12px; padding: 10px; border-bottom: 1px solid #0D1421; }
     .pos-score { color: #00FFC8; font-weight: bold; }
     .neg-score { color: #FF4B4B; font-weight: bold; }
-    
-    .link-btn { 
-        color: #00FFC8 !important; 
-        text-decoration: none; 
-        font-size: 10px; 
-        font-weight: 700; 
-        border: 1px solid #00FFC8; 
-        padding: 2px 5px; 
-        border-radius: 3px;
-    }
-    .link-btn:hover { background: #00FFC8; color: #050A12 !important; }
-
+    .link-btn { color: #00FFC8 !important; text-decoration: none; font-size: 10px; font-weight: 700; border: 1px solid #00FFC8; padding: 2px 5px; border-radius: 3px; }
     .learned-box { border: 1px solid #334155; padding: 15px; border-radius: 8px; margin-bottom: 5px; background: #0F172A; }
     .learned-term { color: #FACC15; font-weight: bold; font-family: monospace; font-size: 14px; }
     .learned-count { color: #94A3B8; font-size: 11px; float: right; }
     .sentiment-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; }
-
-    div.stButton > button {
-        width: 100%;
-        border-radius: 4px;
-        font-weight: bold;
-        border: none;
-        height: 32px;
-        font-size: 11px;
-    }
+    div.stButton > button { width: 100%; border-radius: 4px; font-weight: bold; border: none; height: 32px; font-size: 11px; }
     .btn-approve button { background-color: #00FFC8 !important; color: #050A12 !important; }
     .btn-reject button { background-color: #FF4B4B !important; color: #FFFFFF !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CONFIGURAÇÕES DE ARQUIVOS ---
+# --- 2. CONFIGURAÇÕES DE ARQUIVOS E LÉXICOS ---
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 MARKET_CACHE_FILE = "market_last_prices.json"
@@ -116,16 +89,16 @@ LEXICON_TOPICS = {
     r"opec|saudi|russia|novak|bin salman|cut|quota|output curb": [9.5, 1, "OPEC+ Policy"],
     r"voluntary cut|unwinding|compliance|production target": [8.5, 1, "OPEC+ Supply"],
     r"shale|fracking|permian|rig count|drilling|bakken|spr": [7.5, -1, "US Supply"],
-    r"non-opec|brazil|guyana|canada|output surge": [7.0, -1, "Non-OPEC Supply"],
+    r"non-opec|brazil|guyana|canada|alberta|output surge": [7.0, -1, "Non-OPEC Supply"],
     r"inventory|stockpile|draw|drawdown|depletion|api|eia": [8.0, 1, "Stocks (Deficit)"],
     r"build|glut|oversupply|surplus|storage full": [8.0, -1, "Stocks (Surplus)"],
     r"refinery|outage|maintenance|gasoline|distillates": [7.0, 1, "Refining/Margins"],
     r"crack spread|heating oil|jet fuel|diesel demand": [6.5, 1, "Distillates"],
     r"recession|slowdown|weak|contracting|hard landing|china": [8.8, -1, "Macro (Weak Demand)"],
     r"demand surge|recovery|consumption|growth|stimulus": [8.2, 1, "Macro (Strong Demand)"],
-    r"fed|rate hike|hawkish|inflation|cpi|interest rate": [7.5, -1, "Macro (Fed Tightening)"],
+    r"fed|rate hike|hawkish|inflation|cpi|interest rate|boc": [7.5, -1, "Macro (Fed/BoC Tightening)"],
     r"dovish|rate cut|powell|liquidity|easing|soft landing": [7.5, 1, "Macro (Fed Easing)"],
-    r"dollar|dxy|greenback|fx|yields": [7.0, -1, "DXY Correlation"],
+    r"dollar|dxy|greenback|fx|yields|usdcad": [7.0, -1, "DXY/CAD Correlation"],
     r"gdp|pmi|manufacturing|industrial production": [6.8, 1, "Macro Indicators"],
     r"hedge funds|bullish|bearish|short covering|positioning": [6.5, 1, "Speculative Flow"],
     r"technical break|resistance|support|moving average": [6.0, 1, "Technical Analysis"],
@@ -133,13 +106,20 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
 
+# --- 3. FUNÇÕES DE SUPORTE E IA ---
 def load_json(path):
     if os.path.exists(path):
-        with open(path, 'r') as f: return json.load(f)
+        try:
+            with open(path, 'r') as f: return json.load(f)
+        except: return {}
     return {}
 
 def save_json(path, data):
     with open(path, 'w') as f: json.dump(data, f, indent=4)
+
+def calculate_ica(z_score, alpha):
+    raw_ica = (alpha + (z_score * -5)) / 2
+    return max(min(raw_ica, 10), -10)
 
 def learn_patterns(text, category, score, current_memory):
     text = text.lower()
@@ -166,6 +146,7 @@ def fetch_filtered_news():
     for name, url in RSS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
+            if hasattr(feed, 'bozo') and feed.bozo: continue 
             for entry in feed.entries[:5]:
                 score, cat = 0.0, None
                 title_low = entry.title.lower()
@@ -201,72 +182,75 @@ def fetch_filtered_news():
             pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300).to_csv(DB_FILE, index=False)
         else: df_new.to_csv(DB_FILE, index=False)
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_market_metrics():
-    tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
-    
-    # Carrega cache anterior ou valores padrão se for a primeira vez
+    tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB", "USDCAD": "USDCAD=X"}
     cached = load_json(MARKET_CACHE_FILE)
-    prices = cached.get("prices", {"WTI": 75.0, "BRENT": 80.0, "DXY": 103.5})
-    momentum = cached.get("momentum", 0.0)
-    z_score = cached.get("z_score", 0.0)
+    prices = cached.get("prices", {"WTI": 75.0, "BRENT": 80.0, "DXY": 103.5, "USDCAD": 1.35})
+    momentum, z_score_comp = cached.get("momentum", 0.0), cached.get("z_score_composite", 0.0)
 
     try:
-        # Tentativa de download com timeout curto
-        data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, ignore_tz=True)
-        
-        if not data.empty and 'Close' in data:
+        data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, threads=False)
+        if not data.empty:
             closes = data['Close'].ffill()
-            
-            # Atualiza apenas os ativos que vieram com sucesso
             for k, v in tickers.items(): 
-                if v in closes.columns and not pd.isna(closes[v].iloc[-1]):
-                    prices[k] = float(closes[v].iloc[-1])
+                if v in closes.columns: prices[k] = float(closes[v].iloc[-1])
             
             if "BZ=F" in closes.columns and "CL=F" in closes.columns:
-                spread = closes["BZ=F"] - closes["CL=F"]
-                z_score = (spread.iloc[-1] - spread.mean()) / spread.std()
+                spread_bw = closes["BZ=F"] - closes["CL=F"]
+                z_bw = (spread_bw.iloc[-1] - spread_bw.mean()) / spread_bw.std()
+                cad_strength = 1 / closes["USDCAD=X"]
+                ratio_oil_cad = closes["CL=F"] / cad_strength
+                z_cad = (ratio_oil_cad.iloc[-1] - ratio_oil_cad.mean()) / ratio_oil_cad.std()
+                z_score_comp = (z_bw * 0.6) + (z_cad * 0.4)
                 momentum = float(closes["CL=F"].pct_change().iloc[-1])
             
-            # Atualiza o arquivo físico de cache
-            save_json(MARKET_CACHE_FILE, {
-                "prices": prices, 
-                "momentum": momentum, 
-                "z_score": z_score,
-                "last_sync": datetime.now().strftime("%H:%M:%S")
-            })
-            
-    except Exception:
-        # Captura RateLimit e Silencia o erro para o usuário
-        st.toast("API Limitada. Usando dados locais.", icon="⏳")
-        
-    return prices, momentum, z_score
+            save_json(MARKET_CACHE_FILE, {"prices": prices, "momentum": momentum, "z_score_composite": float(z_score_comp)})
+    except: pass
+    return prices, momentum, z_score_comp
 
+# --- 4. INTERFACE PRINCIPAL ---
 def main():
     fetch_filtered_news()
     prices, momentum, z_score = get_market_metrics()
     df_news = pd.read_csv("Oil_Station_V54_Master.csv") if os.path.exists("Oil_Station_V54_Master.csv") else pd.DataFrame()
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
+    ica_value = calculate_ica(z_score, avg_alpha)
 
-    tab_dash, tab_brain = st.tabs(["📊 MONITOR DE ARBITRAGEM", "🧠 IA LEARNING CENTER"])
+    # LIVE STATUS HEADER
+    now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    st.markdown(f"""
+        <div class="live-status">
+            <div style="font-weight: 800; color: #00FFC8;">TERMINAL XTIUSD | QUANT</div>
+            <div style="font-family: monospace; color: #FFFFFF;">{now} <span style="color: #00FFC8;">● LIVE</span></div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    tab_dash, tab_brain, tab_sitrep = st.tabs(["📊 MONITOR", "🧠 IA LEARNING", "🤖 AI SITREP"])
 
     with tab_dash:
-        if avg_alpha > 6.0 and z_score < -1.5: arb_s, arb_c = "COMPRA AGRESSIVA", "#00FFC8"
-        elif avg_alpha < -6.0 and z_score > 1.5: arb_s, arb_c = "VENDA AGRESSIVA", "#FF4B4B"
-        else: arb_s, arb_c = "EQUILÍBRIO", "#94A3B8"
-
-        st.markdown(f'<div class="arbitrage-monitor" style="border-color:{arb_c}; color:{arb_c};"><strong>{arb_s}</strong></div>', unsafe_allow_html=True)
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("WTI", f"$ {prices['WTI']:.2f}", f"{momentum:.2%}")
-        c2.metric("Z-SCORE", f"{z_score:.2f}")
-        c3.metric("ALPHA", f"{avg_alpha:.2f}")
-        c4.metric("DXY", f"{prices['DXY']:.2f}")
+        c2.metric("BRENT", f"$ {prices['BRENT']:.2f}")
+        c3.metric("USDCAD", f"{prices['USDCAD']:.4f}")
+        c4.metric("Z-SCORE", f"{z_score:.2f}")
+        c5.metric("ALPHA", f"{avg_alpha:.2f}")
         
         col_g, col_t = st.columns([1, 2])
         with col_g:
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=avg_alpha, gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_c}}))
-            fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=50, b=20))
-            st.plotly_chart(fig, width='stretch')
+            fig_ica = go.Figure(go.Indicator(
+                mode="gauge+number", value=ica_value,
+                title={'text': "CONVERGÊNCIA (ICA)", 'font': {'size': 14}},
+                gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8" if ica_value > 0 else "#FF4B4B"},
+                       'steps': [{'range': [-10, -7], 'color': 'rgba(255, 75, 75, 0.2)'},
+                                 {'range': [7, 10], 'color': 'rgba(0, 255, 200, 0.2)'}]}
+            ))
+            fig_ica.update_layout(height=280, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=30, b=0))
+            st.plotly_chart(fig_ica, use_container_width=True)
+            
+            st.markdown(f'<div style="background:rgba(30,41,59,0.3);padding:10px;border-radius:5px;border-left:3px solid #00FFC8;font-size:11px;">'
+                        f'<b>MÉTRICA ICA: {ica_value:.2f}</b><br>União do Sentimento (Alpha) com Desvio (Z-Score/CAD).</div>', unsafe_allow_html=True)
+
         with col_t:
             if not df_news.empty:
                 df_d = df_news.copy()
@@ -276,10 +260,7 @@ def main():
                 st.markdown(f'<div class="scroll-container">{table_html}</div>', unsafe_allow_html=True)
 
     with tab_brain:
-        st.header("Novas Expressões Detectadas (N-Grams)")
-        memory = load_json(MEMORY_FILE)
-        verified = load_json(VERIFIED_FILE)
-        
+        memory, verified = load_json(MEMORY_FILE), load_json(VERIFIED_FILE)
         if not memory: st.info("Processando padrões...")
         else:
             cols = st.columns(3)
@@ -288,39 +269,18 @@ def main():
                 if not valid: continue
                 with cols[idx % 3]:
                     st.markdown(f"#### 📂 {cat}")
-                    for phrase, data in sorted(valid.items(), key=lambda x: x[1]['count'], reverse=True)[:8]:
-                        avg_sent = data['sentiment_sum'] / data['count']
-                        sent_label = "Positivo" if avg_sent > 0 else "Negativo"
-                        sent_color = "#00FFC8" if avg_sent > 0 else "#FF4B4B"
-                        
-                        st.markdown(f"""
-                            <div class="learned-box">
-                                <span class="learned-term">"{phrase}"</span>
-                                <span class="learned-count">Freq: {data['count']}</span><br>
-                                <span class="sentiment-tag" style="background:{sent_color}33; color:{sent_color};">Sugerido: {sent_label}</span>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        
-                        w_input = st.number_input("Peso", value=round(avg_sent, 1), key=f"w_{cat}_{phrase}", label_visibility="collapsed")
-                        
-                        b_col1, b_col2 = st.columns(2)
-                        with b_col1:
-                            st.markdown('<div class="btn-approve">', unsafe_allow_html=True)
-                            if st.button("APROVAR", key=f"app_{cat}_{phrase}"):
-                                if cat not in verified: verified[cat] = {}
-                                verified[cat][phrase] = w_input
-                                save_json(VERIFIED_FILE, verified)
-                                st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
-                        
-                        with b_col2:
-                            st.markdown('<div class="btn-reject">', unsafe_allow_html=True)
-                            if st.button("REPROVAR", key=f"rej_{cat}_{phrase}"):
-                                if phrase in memory[cat]:
-                                    del memory[cat][phrase]
-                                    save_json(MEMORY_FILE, memory)
-                                    st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
+                    for phrase, data in sorted(valid.items(), key=lambda x: x[1]['count'], reverse=True)[:5]:
+                        avg_s = data['sentiment_sum'] / data['count']
+                        st.markdown(f'<div class="learned-box"><span class="learned-term">"{phrase}"</span><br>'
+                                    f'<span class="sentiment-tag" style="background:{"#00FFC8" if avg_s>0 else "#FF4B4B"}33; color:{"#00FFC8" if avg_s>0 else "#FF4B4B"};">Sugerido: {avg_s:.1f}</span></div>', unsafe_allow_html=True)
+
+    with tab_sitrep:
+        if ica_value > 4.5: res, col = "LONG AGGRESSIVE", "#00FFC8"
+        elif ica_value < -4.5: res, col = "SHORT AGGRESSIVE", "#FF4B4B"
+        else: res, col = "WAIT FOR CONFLUENCE", "#94A3B8"
+        st.markdown(f'<div style="background:#0F172A;border:1px solid {col};padding:40px;border-radius:10px;text-align:center;">'
+                    f'<h1 style="color:{col};font-size:50px;">{res}</h1>'
+                    f'<p style="color:#94A3B8;font-size:18px;">ICA Score: {ica_value:.2f} | Alpha: {avg_alpha:.2f}</p></div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
