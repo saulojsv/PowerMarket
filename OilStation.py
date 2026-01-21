@@ -16,7 +16,7 @@ client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 # --- 1. CONFIGURAÇÃO ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD - V80 MAX", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=300000, key="v80_refresh") 
+st_autorefresh(interval=60000, key="v80_refresh") 
 
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
@@ -201,3 +201,4 @@ def main():
                         save_json(VERIFIED_FILE, verified); save_json(MEMORY_FILE, memory); st.rerun()
 
 if __name__ == "__main__": main()
+
