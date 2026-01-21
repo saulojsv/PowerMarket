@@ -10,8 +10,8 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
-st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v68_refresh")
+st.set_page_config(page_title="TERMINAL XTIUSD - ARBITRAGEM", layout="wide", initial_sidebar_state="collapsed")
+st_autorefresh(interval=60000, key="v69_refresh")
 
 st.markdown("""
     <style>
@@ -140,42 +140,51 @@ def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
     prices = {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0}
     wti_momentum = 0.0
+    z_score = 0.0
     try:
-        # ignore_tz=True ajuda a evitar conflitos de cache no banco de dados local
-        data = yf.download(list(tickers.values()), period="2d", interval="15m", progress=False, ignore_tz=True)
+        data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, ignore_tz=True)
         if not data.empty and 'Close' in data:
             closes = data['Close'].ffill()
             for k, v in tickers.items():
                 if v in closes.columns:
                     prices[k] = float(closes[v].iloc[-1])
             
-            if "CL=F" in closes.columns:
+            # Cálculo de Arbitragem Estatística (Z-Score do Spread Brent/WTI)
+            if "BZ=F" in closes.columns and "CL=F" in closes.columns:
+                spread_series = closes["BZ=F"] - closes["CL=F"]
+                mean_spread = spread_series.mean()
+                std_spread = spread_series.std()
+                z_score = (spread_series.iloc[-1] - mean_spread) / std_spread
+                
                 wti_series = closes["CL=F"]
                 wti_momentum = float(wti_series.pct_change(fill_method=None).iloc[-1]) if len(wti_series) > 1 else 0.0
     except:
         pass 
-    return prices, wti_momentum
+    return prices, wti_momentum, z_score
 
 # --- 4. RENDERIZAÇÃO ---
 def main():
     fetch_filtered_news()
-    prices, momentum = get_market_metrics()
+    prices, momentum, z_score = get_market_metrics()
     DB_FILE = "Oil_Station_V54_Master.csv"
     df_news = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame()
     
     avg_alpha = df_news['Alpha'].head(15).mean() if not df_news.empty else 0.0
 
-    # LÓGICA DE ARBITRAGEM
-    if avg_alpha > 6.0 and momentum < 0.0005:
-        arb_status, arb_color = "OPORTUNIDADE DE ARBITRAGEM: COMPRA (ALPHA > PREÇO)", "#00FFC8"
-    elif avg_alpha < -6.0 and momentum > -0.0005:
-        arb_status, arb_color = "OPORTUNIDADE DE ARBITRAGEM: VENDA (ALPHA < PREÇO)", "#FF4B4B"
+    # LÓGICA DE ARBITRAGEM MULTIFATORIAL
+    # Combina Sentimento IA (Alpha) + Divergência de Preço + Arbitragem Estatística (Z-Score)
+    if avg_alpha > 6.0 and z_score < -1.5:
+        arb_status, arb_color = "ARBITRAGEM: COMPRA AGRESSIVA (ALPHA ALTO + SPREAD BAIXO)", "#00FFC8"
+    elif avg_alpha < -6.0 and z_score > 1.5:
+        arb_status, arb_color = "ARBITRAGEM: VENDA AGRESSIVA (ALPHA BAIXO + SPREAD ALTO)", "#FF4B4B"
+    elif abs(z_score) > 2.0:
+        arb_status, arb_color = f"ALERTA DE ARBITRAGEM: REVERSÃO DE SPREAD (Z-SCORE: {z_score:.2f})", "#EAB308"
     else:
-        arb_status, arb_color = "ESTABILIDADE ESTATÍSTICA: SEM ARBITRAGEM", "#94A3B8"
+        arb_status, arb_color = "MERCADO EM EQUILÍBRIO DE ARBITRAGEM", "#94A3B8"
 
     st.markdown(f"""
         <div class="arbitrage-monitor" style="border-color: {arb_color}; color: {arb_color};">
-            <small>ANÁLISE DE ARBITRAGEM QUANTITATIVA</small><br>
+            <small>SISTEMA DE ARBITRAGEM ESTATÍSTICA & SENTIMENTO</small><br>
             <strong style="font-size: 20px;">{arb_status}</strong>
         </div>
     """, unsafe_allow_html=True)
@@ -183,9 +192,9 @@ def main():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("WTI CRUDE", f"$ {prices['WTI']:.2f}", f"{momentum:.2%}")
     spread = prices['BRENT'] - prices['WTI']
-    c2.metric("SPREAD B/W", f"$ {spread:.2f}")
+    c2.metric("SPREAD B/W (Z-SCORE)", f"$ {spread:.2f}", f"Z: {z_score:.2f}")
     c3.metric("IA ALPHA SCORE", f"{avg_alpha:.2f}")
-    c4.metric("DXY INDEX", f"{prices['DXY']:.2f}")
+    c4.metric("DXY INDEX", f"$ {prices['DXY']:.2f}")
 
     st.markdown("---")
     
@@ -198,7 +207,6 @@ def main():
             gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_color}}
         ))
         fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=50, b=20))
-        # Aplicando sintaxe de 2026: width='stretch'
         st.plotly_chart(fig, width='stretch')
 
     with col_table:
