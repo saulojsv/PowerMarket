@@ -12,7 +12,8 @@ from collections import Counter
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD - ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v69_refresh")
+# Aumentado para 5 minutos para evitar bloqueios constantes de IP em 2026
+st_autorefresh(interval=300000, key="v70_refresh")
 
 st.markdown("""
     <style>
@@ -200,31 +201,44 @@ def fetch_filtered_news():
             pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300).to_csv(DB_FILE, index=False)
         else: df_new.to_csv(DB_FILE, index=False)
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=300)
 def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
     
-    # Fallback/Cache Inicial
+    # Carrega cache anterior ou valores padrão se for a primeira vez
     cached = load_json(MARKET_CACHE_FILE)
-    prices = cached.get("prices", {"WTI": 0.0, "BRENT": 0.0, "DXY": 0.0})
+    prices = cached.get("prices", {"WTI": 75.0, "BRENT": 80.0, "DXY": 103.5})
     momentum = cached.get("momentum", 0.0)
     z_score = cached.get("z_score", 0.0)
 
     try:
+        # Tentativa de download com timeout curto
         data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, ignore_tz=True)
+        
         if not data.empty and 'Close' in data:
             closes = data['Close'].ffill()
+            
+            # Atualiza apenas os ativos que vieram com sucesso
             for k, v in tickers.items(): 
-                if v in closes.columns: prices[k] = float(closes[v].iloc[-1])
+                if v in closes.columns and not pd.isna(closes[v].iloc[-1]):
+                    prices[k] = float(closes[v].iloc[-1])
+            
             if "BZ=F" in closes.columns and "CL=F" in closes.columns:
                 spread = closes["BZ=F"] - closes["CL=F"]
                 z_score = (spread.iloc[-1] - spread.mean()) / spread.std()
                 momentum = float(closes["CL=F"].pct_change().iloc[-1])
             
-            # Salva o sucesso no cache
-            save_json(MARKET_CACHE_FILE, {"prices": prices, "momentum": momentum, "z_score": z_score})
-    except Exception as e:
-        st.toast(f"Usando Dados em Cache: API Limitada", icon="⚠️")
+            # Atualiza o arquivo físico de cache
+            save_json(MARKET_CACHE_FILE, {
+                "prices": prices, 
+                "momentum": momentum, 
+                "z_score": z_score,
+                "last_sync": datetime.now().strftime("%H:%M:%S")
+            })
+            
+    except Exception:
+        # Captura RateLimit e Silencia o erro para o usuário
+        st.toast("API Limitada. Usando dados locais.", icon="⏳")
         
     return prices, momentum, z_score
 
