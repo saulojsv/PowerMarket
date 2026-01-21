@@ -1,7 +1,12 @@
 pandas
-streamlit
-yfinance
+re
 feedparser
+os
+json
+streamlit
 plotly
+yfinance
+google-generativeai
+datetime
 streamlit-autorefresh
-matplotlib
+collections
