@@ -80,7 +80,6 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
-        # PROMPT REESTRUTURADO: Agora ele foca em NOVAS entidades
         prompt = (
             f"Manchete: '{title}'. "
             "Aja como especialista em Petróleo. Extraia 3 termos únicos (nomes de campos, cidades, CEOs, ou eventos) "
@@ -113,8 +112,6 @@ def fetch_news():
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
-                # NOVO SISTEMA DE FILTRAGEM DE MEMÓRIA
-                # Ignora palavras comuns de 3 letras ou menos para limpar o lixo
                 for t in ai_data.get("termos", []):
                     t = t.lower().strip()
                     if len(t) > 3 and t not in verified and t not in memory:
@@ -167,7 +164,6 @@ def main():
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
     with t1:
-        # Dashboard simplificado conforme as fotos enviadas
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
         c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
@@ -178,7 +174,8 @@ def main():
         with cg:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
             fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig, use_container_width=True)
+            # ATUALIZADO: width='stretch' substitui use_container_width=True
+            st.plotly_chart(fig, width='stretch')
 
         with cn:
             if not df_audit.empty:
@@ -207,7 +204,6 @@ def main():
                 
         with cr:
             st.markdown("💡 **Sugestões para o Radar**")
-            # Agora exibe a origem da sugestão para facilitar sua decisão
             for term, data in list(memory.items())[:15]:
                 with st.container():
                     col_txt, col_v = st.columns([4, 1])
