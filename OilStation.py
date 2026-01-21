@@ -15,17 +15,16 @@ AV_API_KEY = "UCT0N3Y3CEQ7EIWS"
 client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 # --- 1. CONFIGURAÇÃO ESTÉTICA ---
-st.set_page_config(page_title="TERMINAL XTIUSD - V80 MAX", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v80_refresh") 
 
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 
-# LISTA DE FILTRO ESTRITO (Somente o que envolve Oil/Energia)
 OIL_MANDATORY_TERMS = [
     "oil", "wti", "crude", "brent", "gasoline", "fuel", "opec", 
     "energy", "shale", "refinery", "inventory", "stockpile", 
-    "petroleum", "diesel", "barrel", "rig count", "drilling"
+    "petroleum", "diesel", "barrel", "rig count", "drilling", "tengiz"
 ]
 
 st.markdown("""
@@ -38,7 +37,8 @@ st.markdown("""
     .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .neutro-tag { background: #1e293b; color: #94a3b8; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
-    .learned-box { border: 2px solid #00FFC8; padding: 12px; background: #0F172A !important; color: #00FFC8 !important; margin-bottom: 8px; border-left: 8px solid #00FFC8; font-weight: bold; border-radius: 4px; text-align: center; }
+    .learned-box { border: 1px solid #00FFC8; padding: 8px; background: #0F172A; color: #00FFC8; margin-bottom: 5px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+    div[data-testid="stJson"] { background-color: transparent !important; }
     table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 12px; }
     th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; border-bottom: 2px solid #00FFC8; position: sticky; top: 0; }
     td { padding: 8px; border-bottom: 1px solid #1E293B; }
@@ -80,9 +80,12 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
+        # PROMPT REESTRUTURADO: Agora ele foca em NOVAS entidades
         prompt = (
-            f"Analise o impacto WTI (1, -1 ou 0) e extraia 2 termos técnicos: '{title}'. "
-            f"Responda OBRIGATORIAMENTE apenas JSON puro: {{\"alpha\": v, \"termos\": [\"t1\", \"t2\"]}}"
+            f"Manchete: '{title}'. "
+            "Aja como especialista em Petróleo. Extraia 3 termos únicos (nomes de campos, cidades, CEOs, ou eventos) "
+            "que sejam cruciais nesta notícia. "
+            "Responda APENAS JSON puro: {\"alpha\": 1/-1/0, \"termos\": [\"termo1\", \"termo2\", \"termo3\"]}"
         )
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         res = response.text.replace('```json', '').replace('```', '').strip()
@@ -99,10 +102,7 @@ def fetch_news():
             feed = feedparser.parse(url)
             for entry in feed.entries[:5]:
                 title_low = entry.title.lower()
-                
-                # FILTRO ESTRITO: Pula notícias que não citam Petróleo/Energia
-                if not any(term in title_low for term in OIL_MANDATORY_TERMS):
-                    continue
+                if not any(term in title_low for term in OIL_MANDATORY_TERMS): continue
 
                 lex_weight, lex_dir = 0, 0
                 for patt, (w, d) in LEXICON_TOPICS.items():
@@ -113,22 +113,17 @@ def fetch_news():
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
+                # NOVO SISTEMA DE FILTRAGEM DE MEMÓRIA
+                # Ignora palavras comuns de 3 letras ou menos para limpar o lixo
                 for t in ai_data.get("termos", []):
-                    t = t.lower()
-                    if t not in verified and t not in memory:
-                        memory[t] = {"alpha": ai_dir}
+                    t = t.lower().strip()
+                    if len(t) > 3 and t not in verified and t not in memory:
+                        memory[t] = {"alpha": ai_dir, "news": entry.title[:50]}
                 
                 alpha_final = (lex_weight * lex_dir) + (ai_dir * 2.0)
-                
-                if ai_dir == lex_dir and ai_dir != 0:
-                    status = "CONFLUÊNCIA"
-                elif ai_dir == 0 and lex_dir == 0:
-                    status = "NEUTRO"
-                else:
-                    status = "DIVERGÊNCIA"
+                status = "CONFLUÊNCIA" if (ai_dir == lex_dir and ai_dir != 0) else "NEUTRO" if (ai_dir == 0 and lex_dir == 0) else "DIVERGÊNCIA"
                 
                 news_list.append({
-                    "Data": datetime.now().strftime("%d/%m/%Y"),
                     "Hora": datetime.now().strftime("%H:%M"),
                     "Fonte": source, 
                     "Manchete": entry.title[:100],
@@ -167,19 +162,12 @@ def main():
     avg_alpha = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
     ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
 
-    if ica_val > 5:
-        call_msg, call_clr = "🚀 SINAL: COMPRA (BULLISH CONFLUENCE)", "#00FFC8"
-    elif ica_val < -5:
-        call_msg, call_clr = "📉 SINAL: VENDA (BEARISH CONFLUENCE)", "#FF4B4B"
-    else:
-        call_msg, call_clr = "⚖️ SINAL: AGUARDAR (FILTRO ATIVO)", "#94a3b8"
-
-    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | OIL ONLY MODE</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
-    st.markdown(f"<h2 style='text-align: center; color: {call_clr}; border: 2px solid {call_clr}; padding: 15px; border-radius: 10px; background: #0f172a;'>{call_msg}</h2>", unsafe_allow_html=True)
+    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V80</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
     
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
     with t1:
+        # Dashboard simplificado conforme as fotos enviadas
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
         c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
@@ -188,46 +176,44 @@ def main():
 
         cg, cn = st.columns([1, 2])
         with cg:
-            fig = go.Figure(go.Indicator(
-                mode = "gauge+number", value = ica_val,
-                gauge = {'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"},
-                         'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
+            fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
             fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
 
         with cn:
             if not df_audit.empty:
-                html = "<table><tr><th>DATA/HORA</th><th>FONTE</th><th>MANCHETE</th><th>ALPHA</th><th>STATUS</th></tr>"
+                html = "<table><tr><th>HORA</th><th>FONTE</th><th>MANCHETE</th><th>STATUS</th></tr>"
                 for _, row in df_audit.iterrows():
                     tag = "match-tag" if row["Status"] == "CONFLUÊNCIA" else "neutro-tag" if row["Status"] == "NEUTRO" else "veto-tag"
-                    html += f"<tr><td>{row['Hora']}</td><td>{row['Fonte']}</td><td>{row['Manchete']}</td><td style='color:#00FFC8'>{row['Alpha']}</td><td><span class='{tag}'>{row['Status']}</span></td></tr>"
+                    html += f"<tr><td>{row['Hora']}</td><td>{row['Fonte']}</td><td>{row['Manchete']}</td><td><span class='{tag}'>{row['Status']}</span></td></tr>"
                 st.markdown(f'<div class="scroll-container">{html}</table></div>', unsafe_allow_html=True)
 
     with t2:
-        st.subheader("🕵️ Auditoria de Sentimento (OIL FOCUS)")
         if not df_audit.empty:
             audit_html = "<table><tr><th>MANCHETE</th><th>LEXICON DIR</th><th>IA DIR</th><th>RESULTADO</th></tr>"
             for _, row in df_audit.iterrows():
                 l_clr = "#00FFC8" if row['Lexicon_Dir'] > 0 else "#FF4B4B" if row['Lexicon_Dir'] < 0 else "#888"
                 a_clr = "#00FFC8" if row['IA_Dir'] > 0 else "#FF4B4B" if row['IA_Dir'] < 0 else "#888"
-                status_icon = "✅ CONFERE" if row['Lexicon_Dir'] == row['IA_Dir'] else "❌ DIVERGENTE"
-                audit_html += f"<tr><td>{row['Manchete']}</td><td style='color:{l_clr}; font-weight:bold;'>{row['Lexicon_Dir']}</td><td style='color:{a_clr}; font-weight:bold;'>{row['IA_Dir']}</td><td>{status_icon}</td></tr>"
+                audit_html += f"<tr><td>{row['Manchete']}</td><td style='color:{l_clr}'>{row['Lexicon_Dir']}</td><td style='color:{a_clr}'>{row['IA_Dir']}</td><td>{'✅ CONFERE' if row['Lexicon_Dir'] == row['IA_Dir'] else '❌ DIVERGENTE'}</td></tr>"
             st.markdown(f'<div class="scroll-container">{audit_html}</table></div>', unsafe_allow_html=True)
 
     with t3:
-        st.subheader("🧠 Treinamento (Sugestões Filtradas)")
+        st.subheader("🧠 Treinamento de Inteligência")
         cl, cr = st.columns(2)
         with cl:
-            st.write("✅ **Termos Ensinados**")
-            st.json(verified)
+            st.markdown("✅ **Dicionário Validado**")
+            for term, val in verified.items():
+                st.markdown(f'<div class="learned-box">{term.upper()} (Impacto: {val})</div>', unsafe_allow_html=True)
+                
         with cr:
-            st.write("💡 **Novos Termos Técnicos do Setor**")
-            for term in list(memory.keys())[:15]:
+            st.markdown("💡 **Sugestões para o Radar**")
+            # Agora exibe a origem da sugestão para facilitar sua decisão
+            for term, data in list(memory.items())[:15]:
                 with st.container():
                     col_txt, col_v = st.columns([4, 1])
-                    col_txt.markdown(f'<div class="learned-box">{term.upper()}</div>', unsafe_allow_html=True)
-                    if col_v.button("✅", key=f"y_{term}"):
-                        verified[term] = memory[term]["alpha"]
+                    col_txt.markdown(f'<div class="learned-box">{term.upper()}<br><small style="color:#888">{data.get("news", "")}</small></div>', unsafe_allow_html=True)
+                    if col_v.button("Aprovar", key=f"y_{term}"):
+                        verified[term] = data["alpha"]
                         del memory[term]
                         save_json(VERIFIED_FILE, verified); save_json(MEMORY_FILE, memory); st.rerun()
 
