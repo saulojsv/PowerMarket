@@ -10,7 +10,7 @@ from google import genai
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURAÇÃO IA & ESTÉTICA ---
+# --- 1. CONFIGURAÇÃO IA & ESTÉTICA TERMINAL ---
 client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
@@ -18,20 +18,27 @@ st_autorefresh(interval=300000, key="v80_refresh")
 
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
+CROSS_VAL_FILE = "cross_validation_log.json"
 
+# Estética Estilo Bloomberg/Reuters
 st.markdown("""
     <style>
-    .stApp { background: radial-gradient(circle, #0D1421 0%, #050A12 100%); color: #FFFFFF; }
+    .stApp { background: #050A12; color: #FFFFFF; }
     header {visibility: hidden;}
-    .main .block-container {padding-top: 1rem;}
     [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; }
-    .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(30, 41, 59, 0.3); border-bottom: 2px solid #00FFC8; margin-bottom: 20px; }
-    .site-tag { background: #00FFC8; color: #050A12; padding: 4px 10px; border-radius: 15px; font-size: 11px; font-weight: 800; margin-right: 8px; display: inline-block; margin-bottom: 8px; }
-    .learned-box { border: 1px solid #1E293B; padding: 12px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); margin-bottom: 10px; }
+    .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #111827; border-bottom: 2px solid #00FFC8; margin-bottom: 20px; font-family: monospace; }
+    .scroll-container { height: 450px; overflow-y: auto; border: 1px solid #1E293B; background: #020617; font-family: 'Courier New', monospace; }
+    .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+    .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+    .learned-box { border: 1px solid #1E293B; padding: 10px; background: #0F172A; margin-bottom: 5px; border-left: 4px solid #FACC15; }
+    .site-tag { background: #1E293B; color: #00FFC8; padding: 2px 8px; border-radius: 10px; font-size: 10px; margin-right: 5px; border: 1px solid #00FFC8; }
+    table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 13px; }
+    th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; }
+    td { padding: 8px; border-bottom: 1px solid #1E293B; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. OS 22 LEXICONS (INTEGRAIS) ---
+# --- 2. 22 LEXICONS & 7 FONTES ---
 LEXICON_TOPICS = {
     r"war|attack|missile|drone|strike|conflict|escalation": [9.8, 1, "Geopolitics"],
     r"sanction|embargo|ban|price cap": [9.0, 1, "Sanctions"],
@@ -60,14 +67,14 @@ LEXICON_TOPICS = {
 NEWS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Investing": "https://www.investing.com/rss/news_11.rss",
-    "CNBC Energy": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
+    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
     "MarketWatch": "https://www.marketwatch.com/rss/market-data",
-    "Reuters Cmdty": "https://www.reutersagency.com/feed/?best-topics=commodities&post_type=best",
-    "Yahoo Energy": "https://finance.yahoo.com/rss/headline?s=CL=F",
-    "EIA Reports": "https://www.eia.gov/about/rss/todayinenergy.xml"
+    "Reuters": "https://www.reutersagency.com/feed/?best-topics=commodities&post_type=best",
+    "Yahoo": "https://finance.yahoo.com/rss/headline?s=CL=F",
+    "EIA": "https://www.eia.gov/about/rss/todayinenergy.xml"
 }
 
-# --- 3. SUPORTE & ENGINE ---
+# --- 3. SUPORTE ---
 def load_json(p):
     if os.path.exists(p):
         with open(p, 'r') as f: return json.load(f)
@@ -78,29 +85,49 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
-        prompt = f"Impacto WTI (1,-1,0) e 2 termos: '{title}'. JSON: {{\"alpha\": v, \"termos\": [\"t1\", \"t2\"]}}"
+        prompt = f"Analise impacto Petróleo WTI (1, -1 ou 0) e extraia 2 termos técnicos: '{title}'. JSON: {{\"alpha\": v, \"termos\": [\"t1\", \"t2\"]}}"
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         res = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(res)
     except: return {"alpha": 0, "termos": []}
 
+# --- 4. ENGINE DE ARBITRAGEM (IA vs LEXICON) ---
 def fetch_news():
     news_list = []
     memory = load_json(MEMORY_FILE)
+    
     for source, url in NEWS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:2]:
+                title_low = entry.title.lower()
+                lex_dir = 0
+                # Lógica de Convergência
+                for patt, (w, d, c) in LEXICON_TOPICS.items():
+                    if re.search(patt, title_low):
+                        lex_dir = d
+                        break
+                
                 ai_data = get_ai_val(entry.title)
+                ai_dir = ai_data.get("alpha", 0)
+                
+                # Salva termos para treino
                 for t in ai_data.get("termos", []):
                     t = t.lower()
-                    if t not in memory: memory[t] = {"count": 1, "alpha": ai_data.get("alpha", 0)}
-                    else: memory[t]["count"] += 1
+                    if t not in memory: memory[t] = {"alpha": ai_dir}
+
+                status = "CONFLUÊNCIA" if ai_dir == lex_dir and ai_dir != 0 else "DIVERGÊNCIA"
+                if lex_dir == 0 and ai_dir != 0: status = "IA SOLO"
+
                 news_list.append({
                     "Data": datetime.now().strftime("%H:%M"),
-                    "Fonte": source, "Manchete": entry.title[:100], "Alpha": float(ai_data.get("alpha", 0) * 10)
+                    "Fonte": source,
+                    "Manchete": entry.title[:90],
+                    "Alpha": float(ai_dir * 10),
+                    "Status": status
                 })
         except: continue
+    
     save_json(MEMORY_FILE, memory)
     if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_V80_Hybrid.csv", index=False)
 
@@ -113,20 +140,19 @@ def get_market_metrics():
         ratio = data['Close']['CL=F'] / data['Close']['USDCAD=X']
         z = float((ratio.iloc[-1] - ratio.mean()) / ratio.std())
         return {"WTI": wti, "CAD": cad, "Z": z, "status": "Online"}
-    except: return {"WTI": 75.20, "CAD": 1.380, "Z": 0.0, "status": "Cooldown"}
+    except: return {"WTI": 75.0, "CAD": 1.38, "Z": 0.0, "status": "Cooldown"}
 
-# --- 4. INTERFACE ---
+# --- 5. INTERFACE ---
 def main():
     fetch_news()
     mkt = get_market_metrics()
     memory = load_json(MEMORY_FILE)
-    verified = load_json(VERIFIED_FILE)
     df_news = pd.read_csv("Oil_Station_V80_Hybrid.csv") if os.path.exists("Oil_Station_V80_Hybrid.csv") else pd.DataFrame()
     
     avg_alpha = df_news['Alpha'].mean() if not df_news.empty else 0.0
     ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
 
-    st.markdown(f'<div class="live-status"><b>TERMINAL XTIUSD V80 HYBRID</b> ● {mkt["status"]}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="live-status"><div><b>TERMINAL QUANT</b> | XTIUSD V80</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["📊 DASHBOARD", "🧠 IA TRAINING & LEXICONS"])
 
@@ -135,7 +161,7 @@ def main():
         c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
         c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
         c3.metric("Z-SCORE", f"{mkt['Z']:.2f}")
-        c4.metric("ICA SCORE", f"{ica_val:.2f}")
+        c4.metric("ICA", f"{ica_val:.2f}")
 
         col_g, col_n = st.columns([1, 2])
         with col_g:
@@ -143,35 +169,38 @@ def main():
                 mode = "gauge+number", value = ica_val,
                 gauge = {'axis': {'range': [-10, 10]}, 'bar': {'color': "#00FFC8"},
                          'steps': [{'range': [-10, -3], 'color': '#450a0a'}, {'range': [3, 10], 'color': '#064E3B'}]}))
-            fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+            fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
             st.plotly_chart(fig, width='stretch')
+
         with col_n:
-            if not df_news.empty: st.dataframe(df_news, width='stretch', height=350)
+            if not df_news.empty:
+                # Tabela Estilo Bloomberg/Reuters
+                html = "<table><tr><th>DATA</th><th>FONTE</th><th>MANCHETE</th><th>ALPHA</th><th>STATUS</th></tr>"
+                for _, row in df_news.iterrows():
+                    tag = f'<span class="match-tag">{row["Status"]}</span>' if row["Status"]=="CONFLUÊNCIA" else f'<span class="veto-tag">{row["Status"]}</span>'
+                    html += f"<tr><td>{row['Data']}</td><td>{row['Fonte']}</td><td>{row['Manchete']}</td><td>{row['Alpha']}</td><td>{tag}</td></tr>"
+                html += "</table>"
+                st.markdown(f'<div class="scroll-container">{html}</div>', unsafe_allow_html=True)
 
     with tab2:
-        st.subheader("🌐 FONTES E LÉXICOS (SISTEMA INTEGRAL)")
-        sites_html = "".join([f'<span class="site-tag">{s}</span>' for s in NEWS_SOURCES.keys()])
-        st.markdown(f'<div>{sites_html}</div>', unsafe_allow_html=True)
+        st.subheader("🌐 FONTES ATIVAS")
+        st.markdown(" ".join([f'<span class="site-tag">{s}</span>' for s in NEWS_SOURCES.keys()]), unsafe_allow_html=True)
         
         st.divider()
-        
-        c_left, c_right = st.columns(2)
-        with c_left:
-            st.subheader(f"📖 Dicionário Ativo ({len(LEXICON_TOPICS)} Termos)")
-            df_lex = pd.DataFrame([{"Padrão": k, "Peso": v[0], "Categoria": v[2]} for k, v in LEXICON_TOPICS.items()])
-            st.dataframe(df_lex, width='stretch', height=450)
-        with c_right:
-            st.subheader("🧠 Treinar Novos Termos")
-            if not memory: st.info("Aguardando novas capturas da IA...")
-            for term in list(memory.keys())[:12]:
+        cl, cr = st.columns(2)
+        with cl:
+            st.subheader("📖 Lexicons Bases (22)")
+            st.dataframe(pd.DataFrame([{"Termo": k, "Peso": v[0]} for k, v in LEXICON_TOPICS.items()]), width='stretch', height=400)
+        with cr:
+            st.subheader("🧠 Treino de Novas Palavras")
+            for term in list(memory.keys())[:10]:
                 with st.container():
-                    ci, ca, cr = st.columns([2, 1, 1])
-                    ci.markdown(f'<div class="learned-box">{term.upper()}</div>', unsafe_allow_html=True)
-                    if ca.button("✅", key=f"a_{term}"):
-                        verified[term] = memory[term]["alpha"]
-                        del memory[term]
-                        save_json(VERIFIED_FILE, verified); save_json(MEMORY_FILE, memory); st.rerun()
-                    if cr.button("❌", key=f"r_{term}"):
+                    c_t, c_b = st.columns([3, 1])
+                    c_t.markdown(f'<div class="learned-box"><b>{term.upper()}</b> (Impacto: {memory[term]["alpha"]})</div>', unsafe_allow_html=True)
+                    if c_b.button("✅", key=f"a_{term}"):
+                        # Aqui você salvaria no verified_lexicons.json se quiser
+                        del memory[term]; save_json(MEMORY_FILE, memory); st.rerun()
+                    if c_b.button("❌", key=f"r_{term}"):
                         del memory[term]; save_json(MEMORY_FILE, memory); st.rerun()
 
 if __name__ == "__main__": main()
