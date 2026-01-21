@@ -21,6 +21,13 @@ st_autorefresh(interval=60000, key="v80_refresh")
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 
+# LISTA DE FILTRO ESTRITO (Somente o que envolve Oil/Energia)
+OIL_MANDATORY_TERMS = [
+    "oil", "wti", "crude", "brent", "gasoline", "fuel", "opec", 
+    "energy", "shale", "refinery", "inventory", "stockpile", 
+    "petroleum", "diesel", "barrel", "rig count", "drilling"
+]
+
 st.markdown("""
     <style>
     .stApp { background: #050A12; color: #FFFFFF; }
@@ -31,19 +38,7 @@ st.markdown("""
     .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .neutro-tag { background: #1e293b; color: #94a3b8; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
-    
-    .learned-box { 
-        border: 2px solid #00FFC8; 
-        padding: 12px; 
-        background: #0F172A !important; 
-        color: #00FFC8 !important; 
-        margin-bottom: 8px; 
-        border-left: 8px solid #00FFC8;
-        font-weight: bold;
-        border-radius: 4px;
-        text-align: center;
-    }
-    
+    .learned-box { border: 2px solid #00FFC8; padding: 12px; background: #0F172A !important; color: #00FFC8 !important; margin-bottom: 8px; border-left: 8px solid #00FFC8; font-weight: bold; border-radius: 4px; text-align: center; }
     table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 12px; }
     th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; border-bottom: 2px solid #00FFC8; position: sticky; top: 0; }
     td { padding: 8px; border-bottom: 1px solid #1E293B; }
@@ -86,7 +81,7 @@ def save_json(p, d):
 def get_ai_val(title):
     try:
         prompt = (
-            f"Analise o impacto WTI (1, -1 ou 0) e extraia 2 termos técnicos da manchete: '{title}'. "
+            f"Analise o impacto WTI (1, -1 ou 0) e extraia 2 termos técnicos: '{title}'. "
             f"Responda OBRIGATORIAMENTE apenas JSON puro: {{\"alpha\": v, \"termos\": [\"t1\", \"t2\"]}}"
         )
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
@@ -102,8 +97,13 @@ def fetch_news():
     for source, url in NEWS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:5]:
                 title_low = entry.title.lower()
+                
+                # FILTRO ESTRITO: Pula notícias que não citam Petróleo/Energia
+                if not any(term in title_low for term in OIL_MANDATORY_TERMS):
+                    continue
+
                 lex_weight, lex_dir = 0, 0
                 for patt, (w, d) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
@@ -113,7 +113,6 @@ def fetch_news():
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
-                # Coleta termos para treinamento se não existirem no léxico
                 for t in ai_data.get("termos", []):
                     t = t.lower()
                     if t not in verified and t not in memory:
@@ -121,7 +120,6 @@ def fetch_news():
                 
                 alpha_final = (lex_weight * lex_dir) + (ai_dir * 2.0)
                 
-                # Nova Lógica de Status Unificada
                 if ai_dir == lex_dir and ai_dir != 0:
                     status = "CONFLUÊNCIA"
                 elif ai_dir == 0 and lex_dir == 0:
@@ -169,17 +167,14 @@ def main():
     avg_alpha = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
     ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
 
-    # Lógica de Tradução de Sinal (Call de Mercado)
     if ica_val > 5:
         call_msg, call_clr = "🚀 SINAL: COMPRA (BULLISH CONFLUENCE)", "#00FFC8"
     elif ica_val < -5:
         call_msg, call_clr = "📉 SINAL: VENDA (BEARISH CONFLUENCE)", "#FF4B4B"
     else:
-        call_msg, call_clr = "⚖️ SINAL: AGUARDAR (NEUTRO/DIVERGENTE)", "#94a3b8"
+        call_msg, call_clr = "⚖️ SINAL: AGUARDAR (FILTRO ATIVO)", "#94a3b8"
 
-    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V80 MAX</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
-    
-    # Exibe o sinal de mercado em destaque
+    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | OIL ONLY MODE</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
     st.markdown(f"<h2 style='text-align: center; color: {call_clr}; border: 2px solid {call_clr}; padding: 15px; border-radius: 10px; background: #0f172a;'>{call_msg}</h2>", unsafe_allow_html=True)
     
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
@@ -209,7 +204,7 @@ def main():
                 st.markdown(f'<div class="scroll-container">{html}</table></div>', unsafe_allow_html=True)
 
     with t2:
-        st.subheader("🕵️ Comparativo: Lexicon vs IA")
+        st.subheader("🕵️ Auditoria de Sentimento (OIL FOCUS)")
         if not df_audit.empty:
             audit_html = "<table><tr><th>MANCHETE</th><th>LEXICON DIR</th><th>IA DIR</th><th>RESULTADO</th></tr>"
             for _, row in df_audit.iterrows():
@@ -220,13 +215,13 @@ def main():
             st.markdown(f'<div class="scroll-container">{audit_html}</table></div>', unsafe_allow_html=True)
 
     with t3:
-        st.subheader("🧠 Treinamento e Sugestões")
+        st.subheader("🧠 Treinamento (Sugestões Filtradas)")
         cl, cr = st.columns(2)
         with cl:
             st.write("✅ **Termos Ensinados**")
             st.json(verified)
         with cr:
-            st.write("💡 **Sugestões para Validação**")
+            st.write("💡 **Novos Termos Técnicos do Setor**")
             for term in list(memory.keys())[:15]:
                 with st.container():
                     col_txt, col_v = st.columns([4, 1])
