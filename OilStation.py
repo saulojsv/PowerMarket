@@ -21,39 +21,23 @@ st_autorefresh(interval=60000, key="v80_refresh")
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 
-# CSS CORRIGIDO PARA VISIBILIDADE DAS CAIXAS
 st.markdown("""
     <style>
     .stApp { background: #050A12; color: #FFFFFF; }
     header {visibility: hidden;}
     [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; }
-    
     .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #111827; border-bottom: 2px solid #00FFC8; margin-bottom: 20px; font-family: monospace; }
     .scroll-container { height: 500px; overflow-y: auto; border: 1px solid #1E293B; background: #020617; font-family: monospace; }
-    
     .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
-    
-    /* CORREÇÃO DAS CAIXAS DE TREINAMENTO */
-    .learned-box { 
-        border: 2px solid #00FFC8; 
-        padding: 12px; 
-        background: #0F172A !important; 
-        color: #00FFC8 !important; 
-        margin-bottom: 8px; 
-        border-left: 8px solid #00FFC8;
-        font-weight: bold;
-        border-radius: 4px;
-        text-align: center;
-    }
-    
+    .learned-box { border: 2px solid #00FFC8; padding: 12px; background: #0F172A !important; color: #00FFC8 !important; margin-bottom: 8px; border-left: 8px solid #00FFC8; font-weight: bold; border-radius: 4px; text-align: center; }
     table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 12px; }
     th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; border-bottom: 2px solid #00FFC8; position: sticky; top: 0; }
     td { padding: 8px; border-bottom: 1px solid #1E293B; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LEXICONS E FONTES ---
+# --- 2. LEXICONS ---
 LEXICON_TOPICS = {
     r"war|attack|missile|conflict|escalation|invasion": [9.8, 1],
     r"iran|strait of hormuz|red sea|houthis|tehran": [9.8, 1],
@@ -102,34 +86,33 @@ def fetch_news():
     for source, url in NEWS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:
+            for entry in feed.entries[:3]:
                 title_low = entry.title.lower()
                 lex_weight, lex_dir = 0, 0
                 for patt, (w, d) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         lex_weight, lex_dir = w, d
                         break
-                for term, val in verified.items():
-                    if term in title_low:
-                        lex_weight, lex_dir = 8.5, (1 if val > 0 else -1)
-                        break
+                
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
-                for t in ai_data.get("termos", []):
-                    t = t.lower()
-                    if t not in memory: memory[t] = {"alpha": ai_dir}
+                
                 alpha_final = (lex_weight * lex_dir) + (ai_dir * 2.0)
                 status = "CONFLUÊNCIA" if (ai_dir == lex_dir and ai_dir != 0) else "DIVERGÊNCIA"
-                if lex_dir == 0: status = "IA ANALYSING"
+                
                 news_list.append({
                     "Data": datetime.now().strftime("%d/%m/%Y"),
                     "Hora": datetime.now().strftime("%H:%M"),
-                    "Fonte": source, "Manchete": entry.title[:100],
-                    "Alpha": round(alpha_final, 2), "Status": status
+                    "Fonte": source, 
+                    "Manchete": entry.title[:100],
+                    "Lexicon_Dir": lex_dir,
+                    "IA_Dir": ai_dir,
+                    "Alpha": round(alpha_final, 2), 
+                    "Status": status
                 })
         except: continue
-    save_json(MEMORY_FILE, memory)
-    if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_V80_Hybrid.csv", index=False)
+    
+    if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_Audit.csv", index=False)
 
 @st.cache_data(ttl=600)
 def get_market_metrics():
@@ -149,14 +132,14 @@ def get_market_metrics():
 def main():
     fetch_news()
     mkt = get_market_metrics()
-    memory = load_json(MEMORY_FILE)
-    verified = load_json(VERIFIED_FILE)
-    df_news = pd.read_csv("Oil_Station_V80_Hybrid.csv") if os.path.exists("Oil_Station_V80_Hybrid.csv") else pd.DataFrame()
-    avg_alpha = df_news['Alpha'].mean() if not df_news.empty else 0.0
+    df_audit = pd.read_csv("Oil_Station_Audit.csv") if os.path.exists("Oil_Station_Audit.csv") else pd.DataFrame()
+    
+    avg_alpha = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
     ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
 
-    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V80 MAX</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
-    t1, t2 = st.tabs(["📊 DASHBOARD", "🧠 TRAINING & DICTIONARY"])
+    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | AUDIT MODE</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
+    
+    t1, t2, t3 = st.tabs(["DASHBOARD", "SENTIMENT AUDIT", "TRAINING"])
 
     with t1:
         c1, c2, c3, c4 = st.columns(4)
@@ -175,30 +158,33 @@ def main():
             st.plotly_chart(fig, width='stretch')
 
         with cn:
-            if not df_news.empty:
-                html = "<table><tr><th>DATA</th><th>HORA</th><th>FONTE</th><th>MANCHETE</th><th>ALPHA</th><th>STATUS</th></tr>"
-                for _, row in df_news.iterrows():
-                    tag = "match-tag" if row["Status"] != "DIVERGÊNCIA" else "veto-tag"
-                    html += f"<tr><td>{row['Data']}</td><td>{row['Hora']}</td><td>{row['Fonte']}</td><td>{row['Manchete']}</td><td style='color:#00FFC8'><b>{row['Alpha']}</b></td><td><span class='{tag}'>{row['Status']}</span></td></tr>"
+            if not df_audit.empty:
+                html = "<table><tr><th>DATA/HORA</th><th>FONTE</th><th>MANCHETE</th><th>ALPHA</th><th>STATUS</th></tr>"
+                for _, row in df_audit.iterrows():
+                    tag = "match-tag" if row["Status"] == "CONFLUÊNCIA" else "veto-tag"
+                    html += f"<tr><td>{row['Hora']}</td><td>{row['Fonte']}</td><td>{row['Manchete']}</td><td style='color:#00FFC8'>{row['Alpha']}</td><td><span class='{tag}'>{row['Status']}</span></td></tr>"
                 st.markdown(f'<div class="scroll-container">{html}</table></div>', unsafe_allow_html=True)
 
     with t2:
-        st.subheader("🧠 Dicionário e Treino Ativo")
-        cl, cr = st.columns(2)
-        with cl:
-            st.write("✅ **Termos Ensinados**")
-            st.write(verified if verified else "Aguardando validação...")
-        with cr:
-            st.write("💡 **Clique para Validar (Agora Visível)**")
-            for term in list(memory.keys())[:15]:
-                with st.container():
-                    col_txt, col_v = st.columns([4, 1])
-                    # Texto agora em Neon Green sobre fundo azul marinho profundo
-                    col_txt.markdown(f'<div class="learned-box">{term.upper()}</div>', unsafe_allow_html=True)
-                    if col_v.button("✅", key=f"y_{term}"):
-                        verified[term] = memory[term]["alpha"]
-                        del memory[term]
-                        save_json(VERIFIED_FILE, verified); save_json(MEMORY_FILE, memory); st.rerun()
+        st.subheader(" Comparativo: Lexicon vs Inteligência Artificial")
+        if not df_audit.empty:
+            # Tabela de Auditoria com cores para facilitar o "bater" de informações
+            audit_html = "<table><tr><th>MANCHETE</th><th>LEXICON DIR</th><th>IA DIR</th><th>RESULTADO</th></tr>"
+            for _, row in df_audit.iterrows():
+                l_clr = "#00FFC8" if row['Lexicon_Dir'] > 0 else "#FF4B4B" if row['Lexicon_Dir'] < 0 else "#888"
+                a_clr = "#00FFC8" if row['IA_Dir'] > 0 else "#FF4B4B" if row['IA_Dir'] < 0 else "#888"
+                status_icon = "✅ CONFERE" if row['Lexicon_Dir'] == row['IA_Dir'] else "❌ DIVERGENTE"
+                
+                audit_html += f"""
+                <tr>
+                    <td>{row['Manchete']}</td>
+                    <td style='color:{l_clr}; font-weight:bold;'>{row['Lexicon_Dir']}</td>
+                    <td style='color:{a_clr}; font-weight:bold;'>{row['IA_Dir']}</td>
+                    <td>{status_icon}</td>
+                </tr>"""
+            st.markdown(f'<div class="scroll-container">{audit_html}</table></div>', unsafe_allow_html=True)
+
+    with t3:
+        st.write("Aba de treinamento mantida para validação de termos técnicos.")
 
 if __name__ == "__main__": main()
-
