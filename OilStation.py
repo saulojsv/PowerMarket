@@ -5,13 +5,12 @@ import os
 import json
 import streamlit as st
 import plotly.graph_objects as go
-import requests
+import yfinance as yf
 from google import genai 
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIGURAÇÃO DE CHAVES ---
-AV_API_KEY = "UCT0N3Y3CEQ7EIWS" 
 client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 # --- 1. CONFIGURAÇÃO ESTÉTICA ---
@@ -134,19 +133,32 @@ def fetch_news():
     save_json(MEMORY_FILE, memory)
     if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_Audit.csv", index=False)
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def get_market_metrics():
     try:
-        url_fx = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=USD&to_currency=CAD&apikey={AV_API_KEY}"
-        fx_data = requests.get(url_fx).json()
-        cad = float(fx_data['Realtime Currency Exchange Rate']['5. Exchange Rate'])
-        url_wti = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=WTI&apikey={AV_API_KEY}"
-        wti_data = requests.get(url_wti).json()
-        wti = float(wti_data['Global Quote']['05. price'])
-        change_pct = float(wti_data['Global Quote']['10. change percent'].replace('%', ''))
-        return {"WTI": wti, "CAD": cad, "Z": round(change_pct/1.2, 2), "status": "AV_ONLINE"}
+        # Substituído por yfinance (Sem limite de API bugado)
+        wti_ticker = yf.Ticker("CL=F")
+        cad_ticker = yf.Ticker("USDCAD=X")
+        
+        # Pega últimos 2 dias para calcular variação real
+        wti_hist = wti_ticker.history(period="2d")
+        cad_hist = cad_ticker.history(period="1d")
+        
+        wti_price = wti_hist['Close'].iloc[-1]
+        wti_prev = wti_hist['Close'].iloc[-2]
+        change_pct = ((wti_price - wti_prev) / wti_prev) * 100
+        
+        cad_price = cad_hist['Close'].iloc[-1]
+        
+        return {
+            "WTI": wti_price, 
+            "CAD": cad_price, 
+            "Z": round(change_pct / 1.2, 2), 
+            "status": "LIVE_YF"
+        }
     except:
-        return {"WTI": 75.0, "CAD": 1.38, "Z": 0.0, "status": "API_LIMIT"}
+        # Fallback caso o Yahoo falhe momentaneamente
+        return {"WTI": 75.0, "CAD": 1.38, "Z": 0.0, "status": "MKT_OFFLINE"}
 
 # --- 4. INTERFACE ---
 def main():
@@ -159,7 +171,7 @@ def main():
     avg_alpha = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
     ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
 
-    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V80</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V80 MAX</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
     
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
@@ -173,8 +185,7 @@ def main():
         cg, cn = st.columns([1, 2])
         with cg:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
-            fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            # ATUALIZADO: width='stretch' substitui use_container_width=True
+            fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20, r=20, t=50, b=20))
             st.plotly_chart(fig, width='stretch')
 
         with cn:
