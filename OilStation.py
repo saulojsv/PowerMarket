@@ -6,28 +6,27 @@ import json
 import streamlit as st
 import plotly.graph_objects as go
 import yfinance as yf
-from google import genai 
+from google import genai  # Importação correta para 2026
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 from collections import Counter
 
 # --- 1. CONFIGURAÇÃO IA (NOVA SDK 2026) ---
-client = genai.Client(api_key="AIzaSyAAXdfAPosCN8-ezvekHhR6mO2dVLotT9A")
+# Use APENAS este bloco. Remova qualquer menção a genai.configure ou GenerativeModel.
+client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 def get_ai_insight(headlines, ica):
     try:
-        # Nova sintaxe para o Gemini 2.0
+        # Usando o modelo 2.0 Flash que é o padrão atual
         response = client.models.generate_content(
             model="gemini-2.0-flash", 
             contents=f"Analise estas manchetes: {headlines}. ICA em {ica:.2f}. Resumo de 1 frase para trader XTIUSD."
         )
         return response.text
     except Exception as e:
+        # Log de erro para você ver no console caso falhe
+        print(f"Erro Gemini: {e}")
         return "IA em calibração ou limite atingido."
-# --- CONFIGURAÇÃO IA (GEMINI FREE) ---
-# Substitua pela sua chave API do Google AI Studio
-genai.configure(api_key="SUA_CHAVE_GEMINI_AQUI")
-ai_model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
@@ -245,5 +244,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
