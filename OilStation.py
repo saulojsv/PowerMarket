@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 from collections import Counter
 
 # --- 1. CONFIGURAÇÕES E ESTÉTICA ---
-st.set_page_config(page_title="TERMINAL XTIUSD - ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TERMINAL XTIUSD - QUANT ARBITRAGE", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v69_refresh")
 
 st.markdown("""
@@ -48,8 +48,18 @@ st.markdown("""
     td { font-size: 12px; padding: 10px; border-bottom: 1px solid #0D1421; }
     .pos-score { color: #00FFC8; font-weight: bold; }
     .neg-score { color: #FF4B4B; font-weight: bold; }
-    a { color: #00FFC8 !important; text-decoration: none; font-size: 10px; font-weight: 700; border: 1px solid #00FFC8; padding: 2px 5px; border-radius: 3px; }
     
+    .link-btn { 
+        color: #00FFC8 !important; 
+        text-decoration: none; 
+        font-size: 10px; 
+        font-weight: 700; 
+        border: 1px solid #00FFC8; 
+        padding: 2px 5px; 
+        border-radius: 3px;
+    }
+    .link-btn:hover { background: #00FFC8; color: #050A12 !important; }
+
     .learned-box { border: 1px solid #334155; padding: 15px; border-radius: 8px; margin-bottom: 5px; background: #0F172A; }
     .learned-term { color: #FACC15; font-weight: bold; font-family: monospace; font-size: 14px; }
     .learned-count { color: #94A3B8; font-size: 11px; float: right; }
@@ -57,7 +67,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FONTES E LÉXICOS ESTÁTICOS ---
+# --- 2. LÉXICOS E FONTES (MANTIDOS) ---
 RSS_SOURCES = {
     "Bloomberg Energy": "https://www.bloomberg.com/feeds/bview/energy.xml",
     "Reuters Oil": "https://www.reutersagency.com/feed/?best-topics=energy&format=xml",
@@ -106,45 +116,34 @@ LEXICON_TOPICS = {
     r"algorithmic trading|ctas|margin call|liquidation": [6.0, 1, "Quant Flow"]
 }
 
-# --- 3. GESTÃO DE MEMÓRIA E LÉXICOS APRENDIDOS ---
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 STOPWORDS = {'the', 'a', 'an', 'of', 'to', 'in', 'and', 'is', 'for', 'on', 'at', 'by', 'with', 'from', 'that', 'it', 'as', 'are', 'be', 'this', 'will', 'has', 'have', 'but', 'not', 'up', 'down', 'its', 'their', 'prices', 'oil', 'crude'}
 
-def load_json(filepath):
-    if os.path.exists(filepath):
-        with open(filepath, 'r') as f:
-            return json.load(f)
+def load_json(path):
+    if os.path.exists(path):
+        with open(path, 'r') as f: return json.load(f)
     return {}
 
-def save_json(filepath, data):
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=4)
+def save_json(path, data):
+    with open(path, 'w') as f: json.dump(data, f, indent=4)
 
 def learn_patterns(text, category, score, current_memory):
     text = text.lower()
     text = re.sub(r'[^a-z\s-]', '', text)
     tokens = text.split()
-    
-    if category not in current_memory:
-        current_memory[category] = {}
-    
+    if category not in current_memory: current_memory[category] = {}
     ngrams = []
     if len(tokens) >= 2: ngrams.extend([' '.join(tokens[i:i+2]) for i in range(len(tokens)-1)])
     if len(tokens) >= 3: ngrams.extend([' '.join(tokens[i:i+3]) for i in range(len(tokens)-2)])
-        
-    for phrase in ngrams:
-        if set(phrase.split()).issubset(STOPWORDS): continue
-        
-        if phrase not in current_memory[category]:
-            current_memory[category][phrase] = {"count": 0, "sentiment_sum": 0.0}
-        
-        current_memory[category][phrase]["count"] += 1
-        current_memory[category][phrase]["sentiment_sum"] += score
-            
+    for ph in ngrams:
+        if set(ph.split()).issubset(STOPWORDS): continue
+        if ph not in current_memory[category]: current_memory[category][ph] = {"count": 0, "sentiment_sum": 0.0}
+        current_memory[category][ph]["count"] += 1
+        current_memory[category][ph]["sentiment_sum"] += score
     return current_memory
 
-# --- 4. PROCESSAMENTO ---
+# --- 4. MOTOR DE FETCH ---
 def fetch_filtered_news():
     news_data = []
     DB_FILE = "Oil_Station_V54_Master.csv"
@@ -158,21 +157,16 @@ def fetch_filtered_news():
             for entry in feed.entries[:5]:
                 score, cat = 0.0, None
                 title_low = entry.title.lower()
-                
-                # 1. Checa Léxicos Estáticos (22 originais)
                 for patt, (w, d, c) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         score = float(w * d)
                         cat = c
                         break
-                
-                # 2. Checa Léxicos Verificados (Aprendidos e aprovados)
                 for v_cat, v_phrases in verified_lex.items():
                     for phrase, weight in v_phrases.items():
                         if phrase in title_low:
                             score += weight
                             if not cat: cat = v_cat
-
                 if score != 0:
                     news_data.append({
                         "Data": datetime.now().strftime("%H:%M:%S"),
@@ -195,18 +189,20 @@ def fetch_filtered_news():
             pd.concat([df_new, df_old]).drop_duplicates(subset=['Manchete']).head(300).to_csv(DB_FILE, index=False)
         else: df_new.to_csv(DB_FILE, index=False)
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120) 
 def get_market_metrics():
     tickers = {"WTI": "CL=F", "BRENT": "BZ=F", "DXY": "DX-Y.NYB"}
     prices, momentum, z_score = {"WTI":0.0, "BRENT":0.0, "DXY":0.0}, 0.0, 0.0
     try:
         data = yf.download(list(tickers.values()), period="5d", interval="15m", progress=False, ignore_tz=True)
-        if not data.empty:
+        if not data.empty and 'Close' in data:
             closes = data['Close'].ffill()
-            for k, v in tickers.items(): prices[k] = float(closes[v].iloc[-1])
-            spread = closes["BZ=F"] - closes["CL=F"]
-            z_score = (spread.iloc[-1] - spread.mean()) / spread.std()
-            momentum = float(closes["CL=F"].pct_change().iloc[-1])
+            for k, v in tickers.items(): 
+                if v in closes.columns: prices[k] = float(closes[v].iloc[-1])
+            if "BZ=F" in closes.columns and "CL=F" in closes.columns:
+                spread = closes["BZ=F"] - closes["CL=F"]
+                z_score = (spread.iloc[-1] - spread.mean()) / spread.std()
+                momentum = float(closes["CL=F"].pct_change().iloc[-1])
     except: pass
     return prices, momentum, z_score
 
@@ -233,34 +229,32 @@ def main():
         col_g, col_t = st.columns([1, 2])
         with col_g:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=avg_alpha, gauge={'axis': {'range': [-10, 10]}, 'bar': {'color': arb_c}}))
-            fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
-            st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(t=50, b=20))
+            st.plotly_chart(fig, width='stretch')
         with col_t:
             if not df_news.empty:
                 df_d = df_news.copy()
                 df_d['Alpha'] = df_d['Alpha'].apply(lambda v: f'<span class="{"pos-score" if v>0 else "neg-score"}">{v}</span>')
-                st.markdown(f'<div class="scroll-container">{df_d[["Data", "Fonte", "Manchete", "Alpha"]].to_html(escape=False, index=False)}</div>', unsafe_allow_html=True)
+                df_d['Link'] = df_d['Link'].apply(lambda x: f'<a href="{x}" target="_blank" class="link-btn">DETALHES</a>')
+                table_html = df_d[['Data', 'Fonte', 'Manchete', 'Alpha', 'Link']].to_html(escape=False, index=False)
+                st.markdown(f'<div class="scroll-container">{table_html}</div>', unsafe_allow_html=True)
 
     with tab_brain:
         st.header("Novas Expressões Detectadas (N-Grams)")
         memory = load_json(MEMORY_FILE)
         verified = load_json(VERIFIED_FILE)
-        
-        if not memory: st.info("Processando novos padrões...")
+        if not memory: st.info("Processando padrões...")
         else:
             cols = st.columns(3)
             for idx, (cat, phrases) in enumerate(memory.items()):
                 valid = {k: v for k, v in phrases.items() if v['count'] >= 3 and k not in verified.get(cat, {})}
                 if not valid: continue
-                
                 with cols[idx % 3]:
                     st.markdown(f"#### 📂 {cat}")
                     for phrase, data in sorted(valid.items(), key=lambda x: x[1]['count'], reverse=True)[:8]:
-                        # Cálculo automático de sentimento sugerido
                         avg_sent = data['sentiment_sum'] / data['count']
                         sent_label = "Positivo" if avg_sent > 0 else "Negativo"
                         sent_color = "#00FFC8" if avg_sent > 0 else "#FF4B4B"
-                        
                         st.markdown(f"""
                             <div class="learned-box">
                                 <span class="learned-term">"{phrase}"</span>
@@ -269,9 +263,10 @@ def main():
                             </div>
                         """, unsafe_allow_html=True)
                         
+                        # CORREÇÃO DE CHAVE DUPLICADA: Adicionando a categoria ao ID
                         c_w, c_b = st.columns([1, 1])
-                        w_input = c_w.number_input("Peso", value=round(avg_sent, 1), key=f"w_{phrase}")
-                        if c_b.button("Aprovar", key=f"b_{phrase}"):
+                        w_input = c_w.number_input("Peso", value=round(avg_sent, 1), key=f"w_{cat}_{phrase}")
+                        if c_b.button("Aprovar", key=f"b_{cat}_{phrase}"):
                             if cat not in verified: verified[cat] = {}
                             verified[cat][phrase] = w_input
                             save_json(VERIFIED_FILE, verified)
