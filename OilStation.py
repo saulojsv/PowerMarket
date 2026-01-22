@@ -7,7 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
 import re
-import newspaper # Import direto para usar a função build
+import newspaper
 from newspaper import Article
 from google import genai
 from streamlit_autorefresh import st_autorefresh
@@ -67,44 +67,60 @@ class XTINeuralEngine:
 
     def get_deep_analysis(self, title, full_text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
-        if not full_text or len(full_text) < 100: return 0.0, "NEUTRAL", "Texto Insuficiente"
+        if not full_text or len(full_text) < 100: return 0.0, "NEUTRAL", "Fonte Bloqueada ou Incompleta"
+        
         try:
             contexto = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
-            prompt = (f"DEEP READ ANALYSIS - WTI CRUDE OIL\n"
-                      f"Title: {title}\nContent: {full_text[:3500]}\n"
-                      f"Lexicons: {contexto}\n"
-                      f"Return: [SCORE: -1.0 to 1.0] [LABEL: BULLISH/BEARISH/NEUTRAL] [DEEP_READER: 1 technical summary]")
+            # Prompt mais rigoroso para evitar quebras de regex
+            prompt = (f"Analyze the following text regarding WTI Crude Oil Market Sentiment.\n"
+                      f"Context Lexicons: {contexto}\n"
+                      f"Article Title: {title}\n"
+                      f"Article Content: {full_text[:3000]}\n\n"
+                      f"You MUST return the response exactly in this format:\n"
+                      f"SCORE: [value between -1.0 and 1.0]\n"
+                      f"LABEL: [BULLISH, BEARISH, or NEUTRAL]\n"
+                      f"SUMMARY: [one technical sentence]")
             
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            score = float(re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)[0])
-            label = re.findall(r"LABEL:\s*(\w+)", response.text)[0].upper()
-            summary = response.text.split("DEEP_READER:")[-1].strip()
+            res_text = response.text
+            
+            # Parsing robusto
+            score_match = re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text)
+            label_match = re.search(r"LABEL:\s*(\w+)", res_text)
+            summary_match = re.search(r"SUMMARY:\s*(.*)", res_text)
+            
+            score = float(score_match.group(1)) if score_match else 0.0
+            label = label_match.group(1).upper() if label_match else "NEUTRAL"
+            summary = summary_match.group(1).strip() if summary_match else "Sem resumo disponível"
+            
             return score, label, summary
-        except: return 0.0, "NEUTRAL", "Erro na Análise Neural"
+        except Exception as e:
+            return 0.0, "NEUTRAL", f"Falha Neural: {str(e)[:50]}"
 
 @st.cache_data(ttl=300)
 def auto_scan_real_news(sources):
-    """Mapeia artigos específicos dentro dos sites para evitar ler a home-page."""
     collected = []
-    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec']
+    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec', 'gasoline']
     
     for site_url in sources:
         try:
-            # Build mapeia links do site
             paper = newspaper.build(site_url, memoize_articles=False, language='en')
             count = 0
             for article in paper.articles:
-                if count >= 3: break # Pega as 3 mais recentes por site
+                if count >= 3: break
                 
-                # Filtra se o link parece ser de petróleo
-                if any(kw in article.url.lower() for kw in keywords):
+                # Verificação de URL e Título para relevância
+                url_clean = article.url.lower()
+                if any(kw in url_clean for kw in keywords):
                     try:
                         article.download()
                         article.parse()
-                        if len(article.text) > 200:
+                        # Limpeza básica de texto para não quebrar o prompt
+                        clean_text = article.text.replace('\n', ' ').strip()
+                        if len(clean_text) > 300:
                             collected.append({
                                 "title": article.title,
-                                "text": article.text,
+                                "text": clean_text,
                                 "url": article.url
                             })
                             count += 1
@@ -116,15 +132,14 @@ def auto_scan_real_news(sources):
 def get_market_data():
     try:
         xti = yf.download("CL=F", period="1d", interval="1m", progress=False)
-        if not xti.empty: return xti, xti['Close'].iloc[-1].values[0]
+        if not xti.empty: return xti, xti['Close'].iloc[-1]
     except: pass
     return pd.DataFrame(), 0.0
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("XTI/USD NEURAL TERMINAL")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // DEEP READ REPAIRED >")
     
-    # Agora o scan busca artigos individuais
     headlines_data = auto_scan_real_news(engine.oil_sources)
     analysis_results = []
     
@@ -139,13 +154,13 @@ def main():
         with col_feed:
             st.write(f"🛰️ **LIVE ARTICLE FEED ({len(headlines_data)} Notícias Reais)**")
             if not headlines_data:
-                st.warning("Aguardando novas publicações de petróleo...")
+                st.info("Nenhuma notícia de petróleo detectada nos últimos minutos. Aguardando novos blocos...")
             for item in analysis_results:
                 st.markdown(f'''
                     <div class="news-card-mini {item['l']}">
                         <div style="display: flex; align-items: center;">
                             <a href="{item['url']}" target="_blank" class="news-link">🔗</a>
-                            <span style="color:white; font-weight:500;">{item['h'][:100]}...</span>
+                            <span style="color:white; font-weight:500;">{item['h'][:90]}...</span>
                         </div>
                         <span class="label-tag {item['l']}">{item['l']}</span>
                     </div>
@@ -154,12 +169,12 @@ def main():
         with col_market:
             xti_data, spot_price = get_market_data()
             avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
-            veredito = "BUY" if avg_score > 0.15 else "SELL" if avg_score < -0.15 else "HOLD"
+            veredito = "BUY" if avg_score > 0.1 else "SELL" if avg_score < -0.1 else "HOLD"
             v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
             st.metric("WTI SPOT", f"${spot_price:.2f}")
             if not xti_data.empty:
-                fig = go.Figure(go.Scatter(y=xti_data['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
+                fig = go.Figure(go.Scatter(y=xti_data['Close'].values, line=dict(color='#00FF41', width=3)))
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
                 st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
