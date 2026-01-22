@@ -45,17 +45,20 @@ st.markdown("""
     header {visibility: hidden;}
     [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; }
     .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #111827; border-bottom: 2px solid #00FFC8; margin-bottom: 20px; font-family: monospace; }
-    .scroll-container { height: 500px; overflow-y: auto; border: 1px solid #1E293B; background: #020617; font-family: monospace; }
+    .scroll-container { height: 400px; overflow-y: auto; border: 1px solid #1E293B; background: #020617; font-family: monospace; }
     .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .neutro-tag { background: #1e293b; color: #94a3b8; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .learned-box { border: 1px solid #00FFC8; padding: 8px; background: #0F172A; color: #00FFC8; margin-bottom: 5px; border-radius: 4px; font-size: 12px; font-family: monospace; }
-    table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 12px; }
-    th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; border-bottom: 2px solid #00FFC8; position: sticky; top: 0; }
+    table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 12px; margin-bottom: 20px; }
+    th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; border-bottom: 2px solid #00FFC8; }
     td { padding: 8px; border-bottom: 1px solid #1E293B; }
+    .bias-up { color: #00FFC8; font-weight: bold; }
+    .bias-down { color: #FF4B4B; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
+# --- 2. LEXICONS ---
 LEXICON_TOPICS = {
     r"war|attack|missile|conflict|escalation|invasion": [9.8, 1],
     r"iran|strait of hormuz|red sea|houthis|tehran": [9.8, 1],
@@ -90,13 +93,11 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
-        # PROMPT ATUALIZADO PARA FILTRAR RUÍDO E CAPTURAR EXPRESSÕES
         prompt = (
-            f"Analise: '{title}'. "
-            "1. Remova termos de 'ruído' (nomes de autores, 'clique aqui', datas, termos genéricos). "
-            "2. Identifique fatos específicos e extraia EXPRESSÕES DE CONTEXTO (ex: 'Oil Refinery Falls', 'OPEC quota breach', 'US inventory draw'). "
-            "Apenas se o termo for crucial para o Petróleo. "
-            "Responda APENAS JSON puro: {\"alpha\": 1/-1/0, \"termos\": [\"Expressão 1\", \"Expressão 2\"]}"
+            f"Analise impacto no WTI: '{title}'. "
+            "Remova ruído. Extraia EXPRESSÕES (ex: 'Refinery shutdown', 'API inventory build'). "
+            "Seja agressivo no viés: 1 (Alta), -1 (Baixa), 0 (Neutro). "
+            "Responda APENAS JSON: {\"alpha\": 1/-1/0, \"termos\": [\"Expressão 1\"]}"
         )
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         res = response.text.replace('```json', '').replace('```', '').strip()
@@ -115,27 +116,26 @@ def fetch_news():
                 title_low = entry.title.lower()
                 if not any(term in title_low for term in OIL_MANDATORY_TERMS): continue
 
-                lex_weight, lex_dir = 0, 0
+                lex_dir = 0
                 for patt, (w, d) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
-                        lex_weight, lex_dir = w, d
+                        lex_dir = d
                         break
                 
                 for v_term, v_dir in verified.items():
                     if v_term in title_low:
-                        lex_weight, lex_dir = 9.0, v_dir
+                        lex_dir = v_dir
                         break
 
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
-                # Armazenando expressões em vez de apenas palavras
                 for t in ai_data.get("termos", []):
                     t = t.lower().strip()
                     if len(t) > 3 and t not in verified and t not in memory:
                         memory[t] = {"alpha": ai_dir, "news": entry.title[:60]}
                 
-                alpha_final = (lex_weight * lex_dir) + (ai_dir * 2.0)
+                alpha_final = (lex_dir * 8.0) + (ai_dir * 4.0)
                 status = "CONFLUÊNCIA" if (ai_dir == lex_dir and ai_dir != 0) else "NEUTRO" if (ai_dir == 0 and lex_dir == 0) else "DIVERGÊNCIA"
                 
                 news_list.append({
@@ -172,8 +172,8 @@ def main():
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
     with t1:
-        if st.button("🔄 FORÇAR REESCANEAR NOTÍCIAS"):
-            with st.spinner("IA refinando lexicons e filtrando ruído..."):
+        if st.button("🔄 FORÇAR ATUALIZAÇÃO E ANÁLISE"):
+            with st.spinner("IA reanalisando viés e expressões..."):
                 fetch_news()
                 st.rerun()
 
@@ -191,31 +191,45 @@ def main():
 
         with cn:
             if not df_audit.empty:
-                html = "<table><tr><th>HORA</th><th>FONTE</th><th>MANCHETE</th><th>STATUS</th></tr>"
+                html = "<table><tr><th>HORA</th><th>MANCHETE</th><th>STATUS</th></tr>"
                 for _, row in df_audit.iterrows():
                     tag = "match-tag" if row["Status"] == "CONFLUÊNCIA" else "neutro-tag" if row["Status"] == "NEUTRO" else "veto-tag"
-                    html += f"<tr><td>{row['Hora']}</td><td>{row['Fonte']}</td><td>{row['Manchete']}</td><td><span class='{tag}'>{row['Status']}</span></td></tr>"
+                    html += f"<tr><td>{row['Hora']}</td><td>{row['Manchete']}</td><td><span class='{tag}'>{row['Status']}</span></td></tr>"
                 st.markdown(f'<div class="scroll-container">{html}</table></div>', unsafe_allow_html=True)
 
     with t2:
+        st.subheader("🕵️ Auditoria de Viés (Sinalização)")
         if not df_audit.empty:
-            audit_html = "<table><tr><th>MANCHETE</th><th>LEXICON DIR</th><th>IA DIR</th><th>RESULTADO</th></tr>"
-            for _, row in df_audit.iterrows():
-                l_clr = "#00FFC8" if row['Lexicon_Dir'] > 0 else "#FF4B4B" if row['Lexicon_Dir'] < 0 else "#888"
-                a_clr = "#00FFC8" if row['IA_Dir'] > 0 else "#FF4B4B" if row['IA_Dir'] < 0 else "#888"
-                audit_html += f"<tr><td>{row['Manchete']}</td><td style='color:{l_clr}'>{row['Lexicon_Dir']}</td><td style='color:{a_clr}'>{row['IA_Dir']}</td><td>{'✅ CONFERE' if row['Lexicon_Dir'] == row['IA_Dir'] else '❌ DIVERGENTE'}</td></tr>"
-            st.markdown(f'<div class="scroll-container">{audit_html}</table></div>', unsafe_allow_html=True)
+            col_lex, col_ai = st.columns(2)
+            
+            with col_lex:
+                st.markdown("### 📘 Interpretação Lexicons")
+                lex_html = "<table><tr><th>Manchete</th><th>Viés</th></tr>"
+                for _, row in df_audit.iterrows():
+                    bias = "ALTISTA" if row['Lexicon_Dir'] > 0 else "BAIXA" if row['Lexicon_Dir'] < 0 else "NEUTRO"
+                    cls = "bias-up" if bias == "ALTISTA" else "bias-down" if bias == "BAIXA" else ""
+                    lex_html += f"<tr><td>{row['Manchete'][:60]}...</td><td class='{cls}'>{bias}</td></tr>"
+                st.markdown(lex_html + "</table>", unsafe_allow_html=True)
+
+            with col_ai:
+                st.markdown("### 🤖 Interpretação AI (Gemini)")
+                ai_html = "<table><tr><th>Manchete</th><th>Viés</th></tr>"
+                for _, row in df_audit.iterrows():
+                    bias = "ALTISTA" if row['IA_Dir'] > 0 else "BAIXA" if row['IA_Dir'] < 0 else "NEUTRO"
+                    cls = "bias-up" if bias == "ALTISTA" else "bias-down" if bias == "BAIXA" else ""
+                    ai_html += f"<tr><td>{row['Manchete'][:60]}...</td><td class='{cls}'>{bias}</td></tr>"
+                st.markdown(ai_html + "</table>", unsafe_allow_html=True)
 
     with t3:
         st.subheader("🧠 Treinamento de Inteligência")
         cl, cr = st.columns(2)
         with cl:
-            st.markdown("✅ **Dicionário Validado**")
+            st.markdown("✅ **Dicionário Validado (Lexicons)**")
             for term, val in sorted(verified.items()):
-                st.markdown(f'<div class="learned-box">{term.upper()} (Impacto: {val})</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="learned-box">{term.upper()} (Viés: {"Alta" if val>0 else "Baixa"})</div>', unsafe_allow_html=True)
                 
         with cr:
-            st.markdown("💡 **Expressões e Novos Lexicons (Sem Ruído)**")
+            st.markdown("💡 **Expressões Sugeridas (Fatos Reais)**")
             for term, data in list(memory.items())[:15]:
                 with st.container():
                     col_txt, col_v = st.columns([4, 1])
