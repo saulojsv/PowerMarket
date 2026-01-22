@@ -11,12 +11,12 @@ from newspaper import Article
 from google import genai
 from streamlit_autorefresh import st_autorefresh
 
-# --- CONFIGURAÇÃO DE AMBIENTE ---
+# --- AMBIENTE & REGRAS 2026 ---
 warnings.filterwarnings("ignore", category=SyntaxWarning)
-st.set_page_config(page_title="XTI NEURAL", layout="wide")
+st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.6", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
-# --- CSS WIDE & DEEP READER VISUAL ---
+# --- CSS PERSONALIZADO (SEM SIDEBAR) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -24,32 +24,33 @@ st.markdown("""
     [data-testid="stAppViewContainer"] { background-color: #000000; padding: 1rem 3rem; }
     [data-testid="stSidebar"] { display: none; } 
     
-    .news-card { 
+    /* Layout Home: Notícias Resumidas */
+    .news-card-mini { 
         background-color: #0a0a0a; border: 1px solid #1a1a1a; 
-        padding: 15px; margin-bottom: 12px; border-radius: 4px;
-        border-left: 5px solid #333;
+        padding: 12px; margin-bottom: 8px; border-radius: 4px;
+        display: flex; justify-content: space-between; align-items: center;
+        border-left: 4px solid #333;
     }
-    .sentiment-tag {
-        font-size: 0.75rem; font-weight: 800; padding: 3px 8px; border-radius: 3px;
-        text-transform: uppercase; margin-bottom: 8px; display: inline-block;
-    }
-    .bullish { color: #000; background: #00FF41; border-left-color: #00FF41 !important; }
-    .bearish { color: #000; background: #FF3131; border-left-color: #FF3131 !important; }
-    .neutral { color: #fff; background: #333; }
+    .label-tag { font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; }
+    .BULLISH { color: #00FF41; border: 1px solid #00FF41; border-left: 4px solid #00FF41 !important; }
+    .BEARISH { color: #FF3131; border: 1px solid #FF3131; border-left: 4px solid #FF3131 !important; }
+    .NEUTRAL { color: #888; border: 1px solid #888; }
     
     .status-box { 
         border: 2px solid #00FF41; padding: 30px; text-align: center; 
         font-weight: 800; font-size: 3rem; background-color: #050505;
         font-family: 'JetBrains Mono';
     }
-    .terminal-header { font-family: 'JetBrains Mono'; color: #00FF41; margin-bottom: 25px; border-bottom: 1px solid #1a1a1a; padding-bottom: 10px; }
-    .ai-summary { color: #00FF41; font-family: 'JetBrains Mono'; font-size: 0.85rem; margin-top: 8px; border-top: 1px solid #1a1a1a; padding-top: 5px; }
+    .lexicon-chip {
+        display: inline-block; background: #111; color: #00FF41;
+        padding: 2px 10px; margin: 3px; border-radius: 5px; font-size: 0.8rem;
+        border: 1px solid #00FF41; font-family: 'JetBrains Mono';
+    }
     </style>
     """, unsafe_allow_html=True)
 
 class XTINeuralEngine:
     def __init__(self):
-        # Acesso automático via Secrets
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
@@ -66,86 +67,91 @@ class XTINeuralEngine:
             self.oil_sources = ["https://oilprice.com"]
 
     def get_deep_analysis(self, text):
-        """Avaliação completa pelo Deep Reader da IA"""
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
         try:
             contexto = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
-            prompt = f"Analise o impacto no WTI Crude Oil: '{text}'. Use seus léxicos: {contexto}. Retorne rigorosamente neste formato: [SCORE: -1.0 a 1.0] [LABEL: Bullish, Bearish ou Neutral] [DEEP_READER: 1 frase de conclusão técnica]"
+            prompt = f"Analise WTI: '{text}'. Léxicos: {contexto}. Retorne: [SCORE: -1.0 a 1.0] [LABEL: Bullish, Bearish ou Neutral] [DEEP_READER: 1 frase técnica]"
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            
             score = float(re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)[0])
             label = re.findall(r"LABEL:\s*(\w+)", response.text)[0].upper()
             summary = response.text.split("DEEP_READER:")[-1].strip()
             return score, label, summary
-        except: return 0.0, "NEUTRAL", "Erro na análise neural."
+        except: return 0.0, "NEUTRAL", "Erro Neural"
 
 @st.cache_data(ttl=300)
-def auto_fetch_headlines(sources):
+def auto_scan(sources):
     collected = []
-    for url in sources[:8]:
+    for url in sources[:10]:
         try:
-            article = Article(url)
-            article.download(); article.parse()
-            if len(article.title) > 10: collected.append(article.title)
+            a = Article(url); a.download(); a.parse()
+            if len(a.title) > 10: collected.append(a.title)
         except: continue
     return collected
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown('<div class="terminal-header">### < XTI/USD NEURAL TERMINAL v11.2 // DEEP READER ANALYTICS ></div>', unsafe_allow_html=True)
+    st.markdown("### < XTI/USD NEURAL TERMINAL v11.6 // DEEP LEARNING >")
     
-    # 1. SCAN AUTOMÁTICO DE NOTÍCIAS
-    headlines = auto_fetch_headlines(engine.oil_sources)
-    
-    col_news, col_metrics = st.columns([1.8, 1])
+    # Execução do Core Neural
+    headlines = auto_scan(engine.oil_sources)
+    analysis_results = []
+    for h in headlines:
+        score, label, summary = engine.get_deep_analysis(h)
+        analysis_results.append({"h": h, "s": score, "l": label, "sum": summary})
 
-    with col_news:
-        st.write("🛰️ **LIVE NEWS FEED & AI EVALUATION**")
-        impact_accumulator = []
+    # --- NAVEGAÇÃO POR ABAS ---
+    tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
+
+    with tab_home:
+        col_feed, col_market = st.columns([1.8, 1])
         
-        if not headlines:
-            st.info("Varrendo fontes configuradas no JSON...")
-        
-        for news in headlines:
-            score, label, summary = engine.get_deep_analysis(news)
-            impact_accumulator.append(score)
+        with col_feed:
+            st.write("🛰️ **LIVE RESUME FEED**")
+            for item in analysis_results:
+                st.markdown(f"""
+                    <div class="news-card-mini {item['l']}">
+                        <span style="color:white; font-weight:500;">{item['h'][:110]}...</span>
+                        <span class="label-tag {item['l']}">{item['l']}</span>
+                    </div>
+                """, unsafe_allow_html=True)
+
+        with col_market:
+            try:
+                xti = yf.download("CL=F", period="1d", interval="1m", progress=False)
+                price = xti['Close'].iloc[-1].values[0]
+            except: price = 0.0
             
-            css_class = label.lower() if label in ["BULLISH", "BEARISH", "NEUTRAL"] else "neutral"
+            avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
+            veredito = "BUY" if avg_score > 0.15 else "SELL" if avg_score < -0.15 else "HOLD"
+            v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
             
-            st.markdown(f"""
-                <div class="news-card {css_class}">
-                    <div class="sentiment-tag {css_class}">{label} | SCORE: {score:+.2f}</div>
-                    <div style="color:white; font-weight:700; font-size:1.1rem;">{news}</div>
-                    <div class="ai-summary">DEEP READER: {summary}</div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
+            st.metric("WTI SPOT", f"${price:.2f}")
+            
+            if not xti.empty:
+                fig = go.Figure(go.Scatter(y=xti['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
+                fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
+                st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
-    with col_metrics:
-        # 2. MERCADO E VEREDITO
-        try:
-            data = yf.download("CL=F", period="1d", interval="1m", progress=False)
-            price = data['Close'].iloc[-1].values[0]
-            change = ((price - data['Open'].iloc[0].values[0]) / data['Open'].iloc[0].values[0]) * 100
-        except: price = 0.0; change = 0.0
-
-        avg_score = np.mean(impact_accumulator) if impact_accumulator else 0.0
-        veredito = "BUY" if avg_score > 0.15 else "SELL" if avg_score < -0.15 else "HOLD"
-        v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
+    with tab_neural:
+        st.write("### 🧠 DEEP READER & KNOWLEDGE AUDIT")
+        c1, c2 = st.columns([1, 2])
         
-        st.markdown(f"""
-            <div class="status-box" style="border-color:{v_color}; color:{v_color};">
-                {veredito}<br>
-                <span style="font-size:1rem; color:white;">SYSTEM CONFIDENCE: {abs(avg_score)*100:.1f}%</span>
-            </div>
-        """, unsafe_allow_html=True)
+        with c1:
+            st.markdown("**LEXICONS DETECTADOS NO JSON:**")
+            st.write("Bullish:")
+            st.markdown(" ".join([f'<span class="lexicon-chip">{k}</span>' for k in engine.bullish_keywords.keys()]), unsafe_allow_html=True)
+            st.write("Bearish:")
+            st.markdown(" ".join([f'<span class="lexicon-chip" style="border-color:#FF3131; color:#FF3131;">{k}</span>' for k in engine.bearish_keywords.keys()]), unsafe_allow_html=True)
+            st.write("**FONTES MONITORADAS:**")
+            for site in engine.oil_sources: st.code(site)
 
-        st.metric("WTI CRUDE OIL", f"${price:.2f}", f"{change:+.2f}%")
-        
-        if not data.empty:
-            fig = go.Figure(go.Scatter(y=data['Close'].values.flatten(), line=dict(color='#00FF41', width=3), fill='tozeroy'))
-            fig.update_layout(template="plotly_dark", height=250, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
-            # Atualizado para seguir a regra de 2026: use width='stretch'
-            st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
+        with c2:
+            st.markdown("**DECISÕES DETALHADAS DA IA:**")
+            for res in analysis_results:
+                with st.expander(f"DECISÃO: {res['l']} | SCORE: {res['s']:+.2f}"):
+                    st.write(f"**Manchete:** {res['h']}")
+                    st.success(f"**Deep Reader Conclusion:** {res['sum']}")
 
 if __name__ == "__main__":
     main()
