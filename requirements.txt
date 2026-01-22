@@ -4,5 +4,6 @@ numpy
 plotly
 yfinance
 google-generativeai
+lxml_html_clean
 newspaper3k
 streamlit-autorefresh
