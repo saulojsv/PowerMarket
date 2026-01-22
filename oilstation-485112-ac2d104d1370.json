@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "oilstation-485112",
+  "private_key_id": "ac2d104d137084f0b9ee48427c153754004a34f9",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDjau3ggFU3Y0UI\nIsjqIc7cyKnHCQZNfPHq9NErYu/Ksem3WohZ5ABb1EHYzuDDMOlKnyqGUFDipNT+\nwv1bQdJIjL4zxi+DPeTDYLFfiTUY3LSXVSysZMPx5Goomli/aSHmW8uuub2govsu\nt/mxfw9BCZXUBTmXMDLOGzzFGPHJVZzL7RHdOxjXwHub6ZcyhC7DPIZ9twiX7hqH\n4eFTNnRqmV1p8RoDE+ts9DyNYwbhNvton1O+kKLiw6PDlP6N/zuW+Z8Kqsdz127W\nuDRhnFnOlmkM78PPXPRqDb2GA3v6VKH5FK8z1tLkZ6PEdfsAxRzkUcEKXlB5GWjj\nx32e1eApAgMBAAECggEAbmPFPCiPNOeW5rAb3qqygzFUWCzlRk/UDjzwG6NWyok5\n7aqgbSHjmq+Zlug06gqf83z3Y2MxIBLq4Q89dEKrFFRdLzyQa6Brnvscnkc34u2f\nK6ZInRX8lzpM3ZCua5tYvTzpzdKTXZo/WxoqtiH7AZLpi5VNsznOL4XBJdtJ4nQl\nnV4OUrqrK3nGcQL5N+tZMVQSnAN7OUyBmX8Bt6ZNdj0OEV30D5/y1rKzaFbpugsL\ntuW4cgM9UtnJ7mbKgtRKIlhS1GELUhupRRkKo0rbs2sfNn0dHokrEIl6ot6BYibA\nvJczhmYX7OIrARe2359OlZblVXDeTWudGB5GceSeUQKBgQD/UNjM9Pr9AxoJYkW2\ngJC2MzATQL+uqM9U2LG319wJ5AIn7Nl1+qsFx7EL7h1g4W8qGsSJdWkIKvqb35gb\nzPqwozNeyyFd1lem82CUhCif+qcEKgvSDrBMGcyMLyS5KUXwMZnclN16yEsUGVNb\nmgt0NTbstMh62CW/RojT6LGpvwKBgQDkBvGKI8KWjOzcTExm5oLljLDXJwdSv+ak\nrKProAxx9QLhCYBGq/Zpqftb7JqUMNza6bwmxGjK653sXgsKp8qHvovJPUjX92Ec\nDnUD5/dCOhzjaKIvZclCvj2P4D59SGnc6vwgHpc+yQO+irLtPWi3vcVof4KOJoVt\nQwYWBshgFwKBgCDtSEiGf6gJsl3rcpoq0n7s8xJIk2/vDW4f1CulhxcvdKe5gAIb\nJdtE+axUNS29ZRzE/vvLTJRlFpTrrS5IrTwCkCl1gQQdFIjPcnE06hhXtxpuYb/h\nbRMjcKHToqTOkdp8Sx+Lg1TGaAhbi8iQgVGnW0IDvqc5IQUeD59kryT5AoGBAKYR\n8IP8+1EOHctrvhELPLXVu01W3VyE6oNwQInwrF+qY4hllQjjYLkf1TLjpMjctVyx\n8hgB35g59XAaJcyC21v1iHTtr0mqnw0B8nL/0/JlxHhS0hvW87cqOke4t4oi3QbK\nFQmHfft6BsIU3a8ulD+NdGJgy0KgB3jF4X7VPcXNAoGBAIF84+qT+kufSPve2doP\nGzLcJRxGXtFFpkaKc80Bd3jv9n8leqUYd403t4+WP84v39p29Hsz80lzqErJ0f5u\nKm0KZtDbR3Zl+l0kVtiPgVzaMU2EubBI7vgf+C7TqRObNu7urH2XIk9D7DDFjOoP\nyFUO4kYzYaGICu0IPYbtpdAq\n-----END PRIVATE KEY-----\n",
+  "client_email": "terminaloil@oilstation-485112.iam.gserviceaccount.com",
+  "client_id": "101444833212535747841",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/terminaloil%40oilstation-485112.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
