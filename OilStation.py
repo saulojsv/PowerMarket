@@ -26,6 +26,19 @@ OIL_MANDATORY_TERMS = [
     "petroleum", "diesel", "barrel", "rig count", "drilling", "tengiz"
 ]
 
+# Inicialização automática do dicionário com os 22 Lexicons Estratégicos
+if not os.path.exists(VERIFIED_FILE) or os.path.getsize(VERIFIED_FILE) == 0:
+    initial_lexicons = {
+        "tengiz": 1, "cpc blend": 1, "libya east": 1, "spr draw": -1,
+        "novak": 1, "kharg island": 1, "cushing": 1, "permian": -1,
+        "shale drag": -1, "refinery run": -1, "force majeure": 1,
+        "export ban": 1, "supply glut": -1, "floating storage": -1,
+        "bakken": -1, "ural crude": 1, "druzhba": 1, "houthis": 1,
+        "strait of hormuz": 1, "strategic reserve": -1, "api draw": 1, "eia build": -1
+    }
+    with open(VERIFIED_FILE, 'w') as f:
+        json.dump(initial_lexicons, f, indent=4)
+
 st.markdown("""
     <style>
     .stApp { background: #050A12; color: #FFFFFF; }
@@ -81,8 +94,8 @@ def get_ai_val(title):
     try:
         prompt = (
             f"Manchete: '{title}'. "
-            "Aja como especialista em Petróleo. Extraia 3 termos únicos (nomes de campos, cidades, CEOs, ou eventos) "
-            "que sejam cruciais nesta notícia. "
+            "Aja como especialista em Petróleo. Mesmo que a notícia pareça neutra, extraia 3 termos únicos "
+            "(nomes de campos, cidades, CEOs, ou eventos técnicos) que sejam cruciais para o mercado. "
             "Responda APENAS JSON puro: {\"alpha\": 1/-1/0, \"termos\": [\"termo1\", \"termo2\", \"termo3\"]}"
         )
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
@@ -103,11 +116,18 @@ def fetch_news():
                 if not any(term in title_low for term in OIL_MANDATORY_TERMS): continue
 
                 lex_weight, lex_dir = 0, 0
+                # Verifica lexicons Regex
                 for patt, (w, d) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         lex_weight, lex_dir = w, d
                         break
                 
+                # Verifica Lexicons do Dicionário Validado
+                for v_term, v_dir in verified.items():
+                    if v_term in title_low:
+                        lex_weight, lex_dir = 9.0, v_dir
+                        break
+
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
@@ -136,28 +156,16 @@ def fetch_news():
 @st.cache_data(ttl=300)
 def get_market_metrics():
     try:
-        # Substituído por yfinance (Sem limite de API bugado)
         wti_ticker = yf.Ticker("CL=F")
         cad_ticker = yf.Ticker("USDCAD=X")
-        
-        # Pega últimos 2 dias para calcular variação real
         wti_hist = wti_ticker.history(period="2d")
         cad_hist = cad_ticker.history(period="1d")
-        
         wti_price = wti_hist['Close'].iloc[-1]
         wti_prev = wti_hist['Close'].iloc[-2]
         change_pct = ((wti_price - wti_prev) / wti_prev) * 100
-        
         cad_price = cad_hist['Close'].iloc[-1]
-        
-        return {
-            "WTI": wti_price, 
-            "CAD": cad_price, 
-            "Z": round(change_pct / 1.2, 2), 
-            "status": "LIVE_YF"
-        }
+        return {"WTI": wti_price, "CAD": cad_price, "Z": round(change_pct / 1.2, 2), "status": "LIVE_YF"}
     except:
-        # Fallback caso o Yahoo falhe momentaneamente
         return {"WTI": 75.0, "CAD": 1.38, "Z": 0.0, "status": "MKT_OFFLINE"}
 
 # --- 4. INTERFACE ---
@@ -186,7 +194,7 @@ def main():
         with cg:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
             fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20, r=20, t=50, b=20))
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
 
         with cn:
             if not df_audit.empty:
