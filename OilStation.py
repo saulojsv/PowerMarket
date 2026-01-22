@@ -19,6 +19,7 @@ st_autorefresh(interval=60000, key="v80_refresh")
 
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
+BACKUP_FILE = "verified_lexicons_backup.json"
 
 OIL_MANDATORY_TERMS = [
     "oil", "wti", "crude", "brent", "gasoline", "fuel", "opec", 
@@ -26,7 +27,6 @@ OIL_MANDATORY_TERMS = [
     "petroleum", "diesel", "barrel", "rig count", "drilling", "tengiz"
 ]
 
-# Inicialização automática do dicionário com os 22 Lexicons Estratégicos
 if not os.path.exists(VERIFIED_FILE) or os.path.getsize(VERIFIED_FILE) == 0:
     initial_lexicons = {
         "tengiz": 1, "cpc blend": 1, "libya east": 1, "spr draw": -1,
@@ -50,14 +50,12 @@ st.markdown("""
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .neutro-tag { background: #1e293b; color: #94a3b8; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .learned-box { border: 1px solid #00FFC8; padding: 8px; background: #0F172A; color: #00FFC8; margin-bottom: 5px; border-radius: 4px; font-size: 12px; font-family: monospace; }
-    div[data-testid="stJson"] { background-color: transparent !important; }
     table { width: 100%; border-collapse: collapse; color: #CBD5E1; font-size: 12px; }
     th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; border-bottom: 2px solid #00FFC8; position: sticky; top: 0; }
     td { padding: 8px; border-bottom: 1px solid #1E293B; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LEXICONS ---
 LEXICON_TOPICS = {
     r"war|attack|missile|conflict|escalation|invasion": [9.8, 1],
     r"iran|strait of hormuz|red sea|houthis|tehran": [9.8, 1],
@@ -81,7 +79,6 @@ NEWS_SOURCES = {
     "FT": "https://www.ft.com/commodities?format=rss"
 }
 
-# --- 3. FUNÇÕES ---
 def load_json(p):
     if os.path.exists(p):
         with open(p, 'r') as f: return json.load(f)
@@ -89,14 +86,17 @@ def load_json(p):
 
 def save_json(p, d):
     with open(p, 'w') as f: json.dump(d, f, indent=4)
+    if p == VERIFIED_FILE: save_json(BACKUP_FILE, d)
 
 def get_ai_val(title):
     try:
+        # PROMPT ATUALIZADO PARA FILTRAR RUÍDO E CAPTURAR EXPRESSÕES
         prompt = (
-            f"Manchete: '{title}'. "
-            "Aja como especialista em Petróleo. Mesmo que a notícia pareça neutra, extraia 3 termos únicos "
-            "(nomes de campos, cidades, CEOs, ou eventos técnicos) que sejam cruciais para o mercado. "
-            "Responda APENAS JSON puro: {\"alpha\": 1/-1/0, \"termos\": [\"termo1\", \"termo2\", \"termo3\"]}"
+            f"Analise: '{title}'. "
+            "1. Remova termos de 'ruído' (nomes de autores, 'clique aqui', datas, termos genéricos). "
+            "2. Identifique fatos específicos e extraia EXPRESSÕES DE CONTEXTO (ex: 'Oil Refinery Falls', 'OPEC quota breach', 'US inventory draw'). "
+            "Apenas se o termo for crucial para o Petróleo. "
+            "Responda APENAS JSON puro: {\"alpha\": 1/-1/0, \"termos\": [\"Expressão 1\", \"Expressão 2\"]}"
         )
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         res = response.text.replace('```json', '').replace('```', '').strip()
@@ -129,22 +129,18 @@ def fetch_news():
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
+                # Armazenando expressões em vez de apenas palavras
                 for t in ai_data.get("termos", []):
                     t = t.lower().strip()
                     if len(t) > 3 and t not in verified and t not in memory:
-                        memory[t] = {"alpha": ai_dir, "news": entry.title[:50]}
+                        memory[t] = {"alpha": ai_dir, "news": entry.title[:60]}
                 
                 alpha_final = (lex_weight * lex_dir) + (ai_dir * 2.0)
                 status = "CONFLUÊNCIA" if (ai_dir == lex_dir and ai_dir != 0) else "NEUTRO" if (ai_dir == 0 and lex_dir == 0) else "DIVERGÊNCIA"
                 
                 news_list.append({
-                    "Hora": datetime.now().strftime("%H:%M"),
-                    "Fonte": source, 
-                    "Manchete": entry.title[:100],
-                    "Lexicon_Dir": lex_dir,
-                    "IA_Dir": ai_dir,
-                    "Alpha": round(alpha_final, 2), 
-                    "Status": status
+                    "Hora": datetime.now().strftime("%H:%M"), "Fonte": source, "Manchete": entry.title[:100],
+                    "Lexicon_Dir": lex_dir, "IA_Dir": ai_dir, "Alpha": round(alpha_final, 2), "Status": status
                 })
         except: continue
     
@@ -154,21 +150,15 @@ def fetch_news():
 @st.cache_data(ttl=300)
 def get_market_metrics():
     try:
-        wti_ticker = yf.Ticker("CL=F")
-        cad_ticker = yf.Ticker("USDCAD=X")
-        wti_hist = wti_ticker.history(period="2d")
-        cad_hist = cad_ticker.history(period="1d")
-        wti_price = wti_hist['Close'].iloc[-1]
-        wti_prev = wti_hist['Close'].iloc[-2]
-        change_pct = ((wti_price - wti_prev) / wti_prev) * 100
-        cad_price = cad_hist['Close'].iloc[-1]
-        return {"WTI": wti_price, "CAD": cad_price, "Z": round(change_pct / 1.2, 2), "status": "LIVE_YF"}
+        wti = yf.Ticker("CL=F").history(period="2d")
+        cad = yf.Ticker("USDCAD=X").history(period="1d")
+        wti_p, wti_prev = wti['Close'].iloc[-1], wti['Close'].iloc[-2]
+        change_pct = ((wti_p - wti_prev) / wti_prev) * 100
+        return {"WTI": wti_p, "CAD": cad['Close'].iloc[-1], "Z": round(change_pct / 1.2, 2), "status": "LIVE_YF"}
     except:
         return {"WTI": 75.0, "CAD": 1.38, "Z": 0.0, "status": "MKT_OFFLINE"}
 
-# --- 4. INTERFACE ---
 def main():
-    fetch_news()
     mkt = get_market_metrics()
     df_audit = pd.read_csv("Oil_Station_Audit.csv") if os.path.exists("Oil_Station_Audit.csv") else pd.DataFrame()
     memory = load_json(MEMORY_FILE)
@@ -182,6 +172,11 @@ def main():
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
     with t1:
+        if st.button("🔄 FORÇAR REESCANEAR NOTÍCIAS"):
+            with st.spinner("IA refinando lexicons e filtrando ruído..."):
+                fetch_news()
+                st.rerun()
+
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
         c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
@@ -192,7 +187,6 @@ def main():
         with cg:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
             fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20, r=20, t=50, b=20))
-            # ATUALIZADO: width='stretch' substitui use_container_width=True
             st.plotly_chart(fig, width='stretch')
 
         with cn:
@@ -217,11 +211,11 @@ def main():
         cl, cr = st.columns(2)
         with cl:
             st.markdown("✅ **Dicionário Validado**")
-            for term, val in verified.items():
+            for term, val in sorted(verified.items()):
                 st.markdown(f'<div class="learned-box">{term.upper()} (Impacto: {val})</div>', unsafe_allow_html=True)
                 
         with cr:
-            st.markdown("💡 **Sugestões para o Radar**")
+            st.markdown("💡 **Expressões e Novos Lexicons (Sem Ruído)**")
             for term, data in list(memory.items())[:15]:
                 with st.container():
                     col_txt, col_v = st.columns([4, 1])
