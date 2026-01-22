@@ -13,7 +13,10 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE & REGRAS 2026 ---
 warnings.filterwarnings("ignore", category=SyntaxWarning)
-st.set_page_config(page_title="XTIUSD - TERMINAL", layout="wide")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.7", layout="wide")
+# Autorefresh geral da página
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS PERSONALIZADO ---
@@ -23,7 +26,6 @@ st.markdown("""
     .main { background-color: #000000 !important; }
     [data-testid="stAppViewContainer"] { background-color: #000000; padding: 1rem 3rem; }
     [data-testid="stSidebar"] { display: none; } 
-    
     .news-card-mini { 
         background-color: #0a0a0a; border: 1px solid #1a1a1a; 
         padding: 12px; margin-bottom: 8px; border-radius: 4px;
@@ -33,7 +35,6 @@ st.markdown("""
     .BULLISH { color: #00FF41; border: 1px solid #00FF41; border-left: 4px solid #00FF41 !important; }
     .BEARISH { color: #FF3131; border: 1px solid #FF3131; border-left: 4px solid #FF3131 !important; }
     .NEUTRAL { color: #888; border: 1px solid #888; }
-    
     .status-box { 
         border: 2px solid #00FF41; padding: 30px; text-align: center; 
         font-weight: 800; font-size: 3rem; background-color: #050505;
@@ -43,10 +44,6 @@ st.markdown("""
         display: inline-block; background: #111; color: #00FF41;
         padding: 2px 10px; margin: 3px; border-radius: 5px; font-size: 0.8rem;
         border: 1px solid #00FF41; font-family: 'JetBrains Mono';
-    }
-    .learning-box {
-        background-color: #050505; border: 1px dashed #00FF41;
-        padding: 15px; border-radius: 5px; margin-top: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -59,46 +56,32 @@ class XTINeuralEngine:
         self.load_verified_data()
 
     def load_verified_data(self):
-        # Fallback obrigatório para evitar AttributeError
         self.bullish_keywords = {}
         self.bearish_keywords = {}
-        self.oil_sources = [
-            "https://oilprice.com",
-            "https://www.reuters.com/business/energy/",
-            "https://www.cnbc.com/oil/",
-            "https://www.bloomberg.com/energy"
-        ]
-        
+        self.oil_sources = ["https://oilprice.com", "https://www.reuters.com/business/energy/"]
         try:
             with open('verified_lexicons.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 self.bullish_keywords = data.get('bullish', {})
                 self.bearish_keywords = data.get('bearish', {})
-                # Atualiza sites apenas se existirem no arquivo
-                custom_sites = data.get('sites', [])
-                if custom_sites:
-                    self.oil_sources = custom_sites
-        except Exception:
-            pass # Mantém os padrões de inicialização
+                if data.get('sites'): self.oil_sources = data.get('sites')
+        except: pass
 
     def get_deep_analysis(self, text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE", "NONE"
         try:
             contexto = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
-            prompt = (f"Analise WTI: '{text}'. Léxicos: {contexto}. "
-                      "Retorne rigorosamente: [SCORE: -1.0 a 1.0] [LABEL: Bullish, Bearish ou Neutral] "
-                      "[DEEP_READER: 1 frase técnica] [NEW_TERM: 1 termo técnico chave]")
+            prompt = (f"Analise WTI: '{text}'. Léxicos: {contexto}. Retorne: [SCORE: -1.0 a 1.0] [LABEL: Bullish, Bearish ou Neutral] [DEEP_READER: 1 frase] [NEW_TERM: 1 termo]")
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            
             score = float(re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)[0])
             label = re.findall(r"LABEL:\s*(\w+)", response.text)[0].upper()
             summary = response.text.split("DEEP_READER:")[-1].split("[NEW_TERM:")[0].strip()
             new_term = response.text.split("NEW_TERM:")[-1].replace("]", "").strip().upper()
-            
             return score, label, summary, new_term
         except: return 0.0, "NEUTRAL", "Erro Neural", "NONE"
 
-@st.cache_data(ttl=300)
+# --- CACHE DE NOTÍCIAS (Fontes Externas) ---
+@st.cache_data(ttl=120)
 def auto_scan(sources):
     collected = []
     for url in sources[:10]:
@@ -108,10 +91,22 @@ def auto_scan(sources):
         except: continue
     return collected
 
+# --- CACHE DO YAHOO (WTI SPOT - 5 MINUTOS) ---
+@st.cache_data(ttl=300)
+def get_market_data():
+    try:
+        xti = yf.download("CL=F", period="1d", interval="1m", progress=False)
+        if not xti.empty:
+            price = xti['Close'].iloc[-1].values[0]
+            return xti, price
+    except: pass
+    return pd.DataFrame(), 0.0
+
 def main():
     engine = XTINeuralEngine()
-    st.markdown("< XTI/USD - TERMINAL")
+    st.markdown("###XTI/USD TERMINAL")
     
+    # Processamento de Notícias
     headlines = auto_scan(engine.oil_sources)
     analysis_results = []
     sugestoes_aprendizado = {"bullish": [], "bearish": []}
@@ -119,7 +114,6 @@ def main():
     for h in headlines:
         score, label, summary, new_term = engine.get_deep_analysis(h)
         analysis_results.append({"h": h, "s": score, "l": label, "sum": summary})
-        
         if new_term != "NONE" and len(new_term) > 2:
             if label == "BULLISH" and new_term not in engine.bullish_keywords:
                 sugestoes_aprendizado["bullish"].append(new_term)
@@ -132,57 +126,34 @@ def main():
         col_feed, col_market = st.columns([1.8, 1])
         with col_feed:
             st.write("🛰️ **LIVE RESUME FEED**")
-            if not analysis_results:
-                st.info("Aguardando novas manchetes...")
             for item in analysis_results:
                 st.markdown(f'<div class="news-card-mini {item["l"]}"><span style="color:white; font-weight:500;">{item["h"][:110]}...</span><span class="label-tag {item["l"]}">{item["l"]}</span></div>', unsafe_allow_html=True)
 
         with col_market:
-            try:
-                xti = yf.download("CL=F", period="1d", interval="1m", progress=False)
-                price = xti['Close'].iloc[-1].values[0]
-            except: price = 0.0
+            # Busca dados do mercado com cache de 5min
+            xti_data, spot_price = get_market_data()
             
             avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
             veredito = "BUY" if avg_score > 0.15 else "SELL" if avg_score < -0.15 else "HOLD"
             v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
             
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
-            st.metric("WTI SPOT", f"${price:.2f}")
+            st.metric("WTI SPOT (5m Cache)", f"${spot_price:.2f}")
             
-            if not xti.empty:
-                fig = go.Figure(go.Scatter(y=xti['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
+            if not xti_data.empty:
+                fig = go.Figure(go.Scatter(y=xti_data['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
-                # Ajustado para width='stretch' conforme regras de 2026
                 st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
     with tab_neural:
         st.write("### 🧠 DEEP READER & KNOWLEDGE AUDIT")
         c1, c2 = st.columns([1, 2])
-        
         with c1:
-            st.markdown("**LEXICONS ATUAIS:**")
-            # Renderização segura com verificação de dicionários vazios
             st.write(f"Bullish ({len(engine.bullish_keywords)}):")
-            st.markdown(" ".join([f'<span class="lexicon-chip">{k}</span>' for k in engine.bullish_keywords.keys()]) if engine.bullish_keywords else "Nenhum dado", unsafe_allow_html=True)
-            
+            st.markdown(" ".join([f'<span class="lexicon-chip">{k}</span>' for k in engine.bullish_keywords.keys()]) if engine.bullish_keywords else "Nenhum", unsafe_allow_html=True)
             st.write(f"Bearish ({len(engine.bearish_keywords)}):")
-            st.markdown(" ".join([f'<span class="lexicon-chip" style="border-color:#FF3131; color:#FF3131;">{k}</span>' for k in engine.bearish_keywords.keys()]) if engine.bearish_keywords else "Nenhum dado", unsafe_allow_html=True)
-            
-            st.markdown('<div class="learning-box">', unsafe_allow_html=True)
-            st.markdown("#### 💡 NOVOS LÉXICOS DETECTADOS")
-            final_bullish = list(set(sugestoes_aprendizado["bullish"]))
-            final_bearish = list(set(sugestoes_aprendizado["bearish"]))
-            
-            if final_bullish or final_bearish:
-                st.json({"bullish": {term: 0.5 for term in final_bullish}, "bearish": {term: 0.5 for term in final_bearish}})
-                st.button("Sincronizar Novos Léxicos (Sessão Atual)")
-            else:
-                st.write("Monitorando padrões inéditos...")
-            st.markdown('</div>', unsafe_allow_html=True)
-
+            st.markdown(" ".join([f'<span class="lexicon-chip" style="border-color:#FF3131; color:#FF3131;">{k}</span>' for k in engine.bearish_keywords.keys()]) if engine.bearish_keywords else "Nenhum", unsafe_allow_html=True)
         with c2:
-            st.markdown("**DECISÕES DETALHADAS DA IA:**")
             for res in analysis_results:
                 with st.expander(f"DECISÃO: {res['l']} | SCORE: {res['s']:+.2f}"):
                     st.write(f"**Manchete:** {res['h']}")
