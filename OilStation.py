@@ -116,13 +116,11 @@ def fetch_news():
                 if not any(term in title_low for term in OIL_MANDATORY_TERMS): continue
 
                 lex_weight, lex_dir = 0, 0
-                # Verifica lexicons Regex
                 for patt, (w, d) in LEXICON_TOPICS.items():
                     if re.search(patt, title_low):
                         lex_weight, lex_dir = w, d
                         break
                 
-                # Verifica Lexicons do Dicionário Validado
                 for v_term, v_dir in verified.items():
                     if v_term in title_low:
                         lex_weight, lex_dir = 9.0, v_dir
@@ -194,7 +192,8 @@ def main():
         with cg:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
             fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20, r=20, t=50, b=20))
-            st.plotly_chart(fig, use_container_width=True)
+            # ATUALIZADO: width='stretch' substitui use_container_width=True
+            st.plotly_chart(fig, width='stretch')
 
         with cn:
             if not df_audit.empty:
