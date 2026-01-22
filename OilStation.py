@@ -137,7 +137,7 @@ def main():
 
     st.markdown("---")
 
-    # MAIN INTERFACE
+    # MAIN INTERFACE - CORREÇÃO DE SINTAXE AQUI
     col_chart, col_verdict = st.columns([2, 1])
 
     with col_chart:
@@ -150,15 +150,16 @@ def main():
 
         st.markdown("#### LEXICON IMPACT MATRIX")
         if events:
-            cols = st.columns(2)
+            cols_events = st.columns(2)
             for i, (evt, vec) in enumerate(events):
                 color = "#00FF41" if vec == "BULLISH" else "#FF0000"
-                cols[i % 2].markdown(f"""<div class="news-card" style="border-left-color: {color};">
+                cols_events[i % 2].markdown(f"""<div class="news-card" style="border-left-color: {color};">
                     <strong>{evt}</strong> | VECTOR: {vec}</div>""", unsafe_allow_html=True)
         else:
             st.info("Waiting for Lexicon Corpus input to decode sentiment.")
 
-    with col_right := col_verdict:
+    # AQUI ESTÁ A CORREÇÃO FINAL PARA O ERRO SyntaxError
+    with col_verdict:
         st.markdown("#### STRATEGIC VERDICT")
         confidence = abs(final_score) * 100
         
