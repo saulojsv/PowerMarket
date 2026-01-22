@@ -7,6 +7,8 @@ import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
 import re
+import requests
+from bs4 import BeautifulSoup
 import newspaper
 from newspaper import Article, Config
 from google import genai
@@ -18,12 +20,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.7", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
-
-# Configuração de emulação de navegador para evitar bloqueios
-agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-config = Config()
-config.browser_user_agent = agent
-config.request_timeout = 15
 
 # --- CSS PERSONALIZADO ---
 st.markdown("""
@@ -60,6 +56,9 @@ class XTINeuralEngine:
             "https://www.reuters.com/business/energy/",
             "https://www.cnbc.com/oil/"
         ]
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         self.load_verified_data()
 
     def load_verified_data(self):
@@ -71,54 +70,66 @@ class XTINeuralEngine:
                 self.bearish_keywords = data.get('bearish', {})
         except: pass
 
-    def get_deep_analysis(self, title, full_text):
+    def get_deep_analysis(self, title, url):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
         
-        # Sistema de Fallback: Se o texto for curto (bloqueio), analisa pelo título
-        is_fallback = len(full_text) < 200
-        analysis_content = f"HEADLINE: {title}" if is_fallback else f"CONTENT: {full_text[:2500]}"
+        # Tentativa de extração direta via Requests (Bypassing Newspaper3k)
+        text_content = ""
+        try:
+            r = requests.get(url, headers=self.headers, timeout=10)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            # Pega todos os parágrafos para formar o corpo da notícia
+            paragraphs = soup.find_all('p')
+            text_content = " ".join([p.get_text() for p in paragraphs if len(p.get_text()) > 50])
+        except:
+            text_content = ""
+
+        # Se falhar a extração do texto, a IA usará o título e a URL como contexto
+        context = text_content[:3000] if len(text_content) > 200 else f"Headline only (Access Blocked): {title}"
         
         try:
-            prompt = (f"Analyze WTI Oil Sentiment.\n"
-                      f"{analysis_content}\n\n"
-                      f"Return strictly:\nSCORE: [float -1.0 to 1.0]\nLABEL: [BULLISH/BEARISH/NEUTRAL]\nSUMMARY: [1 tech sentence]")
+            prompt = (f"Analyze WTI Crude Oil Market Sentiment.\n"
+                      f"Source URL: {url}\n"
+                      f"Title: {title}\n"
+                      f"Context: {context}\n\n"
+                      f"Instruction: Even if context is limited, provide your best technical estimation.\n"
+                      f"Return format:\nSCORE: [float -1.0 to 1.0]\nLABEL: [BULLISH/BEARISH/NEUTRAL]\nSUMMARY: [one technical sentence]")
             
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
             res_text = response.text
             
-            score = float(re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text).group(1))
-            label = re.search(r"LABEL:\s*(\w+)", res_text).group(1).upper()
-            summary = re.search(r"SUMMARY:\s*(.*)", res_text).group(1).strip()
+            score_match = re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text)
+            label_match = re.search(r"LABEL:\s*(\w+)", res_text)
+            summary_match = re.search(r"SUMMARY:\s*(.*)", res_text)
             
-            if is_fallback: summary = "(Headline Analysis) " + summary
+            score = float(score_match.group(1)) if score_match else 0.0
+            label = label_match.group(1).upper() if label_match else "NEUTRAL"
+            summary = summary_match.group(1).strip() if summary_match else "Análise baseada em metadados."
             
             return score, label, summary
-        except:
-            return 0.0, "NEUTRAL", "Falha no parsing neural"
+        except Exception as e:
+            return 0.0, "NEUTRAL", f"Erro Neural: {str(e)[:30]}"
 
 @st.cache_data(ttl=60)
 def auto_scan_real_news(sources):
     collected = []
     keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec']
+    config = Config()
+    config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     
     for site_url in sources:
         try:
-            # Aplicando a config de Anti-Bloqueio
             paper = newspaper.build(site_url, config=config, memoize_articles=False)
             count = 0
             for article in paper.articles:
                 if count >= 3: break
                 if any(kw in article.url.lower() for kw in keywords):
-                    try:
-                        article.download()
-                        article.parse()
-                        collected.append({
-                            "title": article.title,
-                            "text": article.text.strip(),
-                            "url": article.url
-                        })
-                        count += 1
-                    except: continue
+                    # Coletamos apenas a URL e o Título aqui para evitar o travamento do build
+                    collected.append({
+                        "title": article.title if article.title else "Oil Market Update",
+                        "url": article.url
+                    })
+                    count += 1
         except: continue
     return collected
 
@@ -135,14 +146,16 @@ def get_market_data():
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // ANTI-BLOCK ACTIVE >")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // DEEP LINK SCANNER >")
     
     headlines_data = auto_scan_real_news(engine.oil_sources)
     analysis_results = []
     
+    # Progresso visual para o usuário
     for item in headlines_data:
-        s, l, sum_ = engine.get_deep_analysis(item['title'], item['text'])
-        analysis_results.append({"h": item['title'], "url": item['url'], "s": s, "l": l, "sum": sum_})
+        # Passamos a URL para a IA tentar ler diretamente
+        score, label, summary = engine.get_deep_analysis(item['title'], item['url'])
+        analysis_results.append({"h": item['title'], "url": item['url'], "s": score, "l": label, "sum": summary})
 
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
@@ -178,8 +191,9 @@ def main():
     with tab_neural:
         for res in analysis_results:
             with st.expander(f"DEEP READ: {res['h']}"):
-                st.write(f"**Resultado:** {res['sum']}")
+                st.write(f"**Análise:** {res['sum']}")
                 st.write(f"**Score:** {res['s']}")
+                st.caption(f"Fonte: {res['url']}")
 
 if __name__ == "__main__":
     main()
