@@ -56,9 +56,7 @@ class XTINeuralEngine:
             "https://www.reuters.com/business/energy/",
             "https://www.cnbc.com/oil/"
         ]
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         self.load_verified_data()
 
     def load_verified_data(self):
@@ -72,43 +70,25 @@ class XTINeuralEngine:
 
     def get_deep_analysis(self, title, url):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
-        
-        # Tentativa de extração direta via Requests (Bypassing Newspaper3k)
         text_content = ""
         try:
             r = requests.get(url, headers=self.headers, timeout=10)
             soup = BeautifulSoup(r.text, 'html.parser')
-            # Pega todos os parágrafos para formar o corpo da notícia
             paragraphs = soup.find_all('p')
             text_content = " ".join([p.get_text() for p in paragraphs if len(p.get_text()) > 50])
-        except:
-            text_content = ""
+        except: pass
 
-        # Se falhar a extração do texto, a IA usará o título e a URL como contexto
-        context = text_content[:3000] if len(text_content) > 200 else f"Headline only (Access Blocked): {title}"
-        
+        context = text_content[:3000] if len(text_content) > 200 else f"Headline only: {title}"
         try:
-            prompt = (f"Analyze WTI Crude Oil Market Sentiment.\n"
-                      f"Source URL: {url}\n"
-                      f"Title: {title}\n"
-                      f"Context: {context}\n\n"
-                      f"Instruction: Even if context is limited, provide your best technical estimation.\n"
+            prompt = (f"Analyze WTI Oil Sentiment.\nURL: {url}\nTitle: {title}\nContext: {context}\n\n"
                       f"Return format:\nSCORE: [float -1.0 to 1.0]\nLABEL: [BULLISH/BEARISH/NEUTRAL]\nSUMMARY: [one technical sentence]")
-            
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
             res_text = response.text
-            
-            score_match = re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text)
-            label_match = re.search(r"LABEL:\s*(\w+)", res_text)
-            summary_match = re.search(r"SUMMARY:\s*(.*)", res_text)
-            
-            score = float(score_match.group(1)) if score_match else 0.0
-            label = label_match.group(1).upper() if label_match else "NEUTRAL"
-            summary = summary_match.group(1).strip() if summary_match else "Análise baseada em metadados."
-            
+            score = float(re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text).group(1))
+            label = re.search(r"LABEL:\s*(\w+)", res_text).group(1).upper()
+            summary = re.search(r"SUMMARY:\s*(.*)", res_text).group(1).strip()
             return score, label, summary
-        except Exception as e:
-            return 0.0, "NEUTRAL", f"Erro Neural: {str(e)[:30]}"
+        except: return 0.0, "NEUTRAL", "Análise baseada em metadados."
 
 @st.cache_data(ttl=60)
 def auto_scan_real_news(sources):
@@ -116,7 +96,6 @@ def auto_scan_real_news(sources):
     keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec']
     config = Config()
     config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    
     for site_url in sources:
         try:
             paper = newspaper.build(site_url, config=config, memoize_articles=False)
@@ -124,11 +103,7 @@ def auto_scan_real_news(sources):
             for article in paper.articles:
                 if count >= 3: break
                 if any(kw in article.url.lower() for kw in keywords):
-                    # Coletamos apenas a URL e o Título aqui para evitar o travamento do build
-                    collected.append({
-                        "title": article.title if article.title else "Oil Market Update",
-                        "url": article.url
-                    })
+                    collected.append({"title": article.title if article.title else "Oil Update", "url": article.url})
                     count += 1
         except: continue
     return collected
@@ -136,26 +111,33 @@ def auto_scan_real_news(sources):
 @st.cache_data(ttl=30)
 def get_market_data():
     try:
-        xti = yf.download("CL=F", period="2d", interval="1m", progress=False)
-        if not xti.empty:
-            last = float(xti['Close'].iloc[-1])
-            delta = last - float(xti['Close'].iloc[-2])
-            return xti, last, delta
-    except: pass
-    return pd.DataFrame(), 0.0, 0.0
+        df = yf.download("CL=F", period="1d", interval="1m", progress=False)
+        if not df.empty:
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            
+            prices = df['Close'].dropna()
+            if len(prices) >= 1:
+                # CORREÇÃO FUTUREWARNING: Usando .iloc[index] antes de converter para float
+                val_last = prices.iloc[-1]
+                val_prev = prices.iloc[-2] if len(prices) > 1 else val_last
+                
+                last_price = float(val_last)
+                prev_price = float(val_prev)
+                return prices, last_price, last_price - prev_price
+    except Exception:
+        pass
+    return pd.Series(), 0.0, 0.0
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // DEEP LINK SCANNER >")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // STABLE BUILD >")
     
     headlines_data = auto_scan_real_news(engine.oil_sources)
     analysis_results = []
-    
-    # Progresso visual para o usuário
     for item in headlines_data:
-        # Passamos a URL para a IA tentar ler diretamente
-        score, label, summary = engine.get_deep_analysis(item['title'], item['url'])
-        analysis_results.append({"h": item['title'], "url": item['url'], "s": score, "l": label, "sum": summary})
+        s, l, sum_ = engine.get_deep_analysis(item['title'], item['url'])
+        analysis_results.append({"h": item['title'], "url": item['url'], "s": s, "l": l, "sum": sum_})
 
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
@@ -175,25 +157,35 @@ def main():
                 ''', unsafe_allow_html=True)
 
         with col_market:
-            xti_data, price, delta = get_market_data()
+            prices_series, spot_price, delta = get_market_data()
             avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
             veredito = "BUY" if avg_score > 0.1 else "SELL" if avg_score < -0.1 else "HOLD"
             v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
             
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
-            st.metric("WTI SPOT", f"${price:.2f}", delta=f"{delta:.2f}")
+            st.metric("WTI SPOT", f"${spot_price:.2f}", delta=f"{delta:.2f}")
             
-            if not xti_data.empty:
-                fig = go.Figure(go.Scatter(y=xti_data['Close'].values, line=dict(color='#00FF41', width=3)))
-                fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
-                st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
+            if not prices_series.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=prices_series.index, 
+                    y=prices_series.values, 
+                    fill='tozeroy', 
+                    line=dict(color='#00FF41', width=2),
+                    fillcolor='rgba(0, 255, 65, 0.1)'
+                ))
+                fig.update_layout(
+                    template="plotly_dark", height=220, margin=dict(l=0,r=0,t=10,b=0),
+                    xaxis=dict(visible=False), yaxis=dict(side="right", gridcolor="#1a1a1a"),
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+                )
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with tab_neural:
         for res in analysis_results:
             with st.expander(f"DEEP READ: {res['h']}"):
                 st.write(f"**Análise:** {res['sum']}")
-                st.write(f"**Score:** {res['s']}")
-                st.caption(f"Fonte: {res['url']}")
+                st.write(f"**Sentiment Score:** {res['s']}")
 
 if __name__ == "__main__":
     main()
