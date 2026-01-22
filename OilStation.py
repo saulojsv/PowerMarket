@@ -17,7 +17,7 @@ AUDIT_CSV = "Oil_Station_Audit.csv"
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v100_refresh") 
 
-# CSS Unificado: Dashboard e Audit agora seguem o padrão Dark/Neon
+# CSS Unificado: Forçando tabelas a saírem do branco para o Dark/Neon
 st.markdown("""
     <style>
     .stApp { background: #050A12; color: #FFFFFF; }
@@ -28,26 +28,30 @@ st.markdown("""
     .driver-val { font-size: 20px; font-weight: bold; color: #F8FAFC; font-family: monospace; }
     .driver-label { font-size: 10px; color: #94A3B8; text-transform: uppercase; }
     
-    /* Tabela Cyberpunk Unificada */
-    .terminal-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 12px; background: #020617; }
-    .terminal-table th { background: #1E293B; color: #00FFC8; text-align: left; padding: 10px; border-bottom: 1px solid #334155; }
-    .terminal-table td { padding: 8px; border-bottom: 1px solid #0F172A; color: #F8FAFC; border: 1px solid #1E293B; }
+    /* CORREÇÃO DO FUNDO BRANCO NAS TABELAS */
+    div[data-testid="stDataFrame"] {
+        background-color: #020617;
+        border: 1px solid #1E293B;
+        border-radius: 4px;
+    }
     
+    /* Estilo para as abas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] { background-color: #050A12; }
+    .stTabs [data-baseweb="tab"] { color: #94A3B8; }
+    .stTabs [data-baseweb="tab-highlight"] { background-color: #00FFC8; }
+
     .ai-insight { background: #0F172A; border: 1px solid #00FFC8; padding: 15px; border-radius: 5px; font-family: monospace; font-size: 13px; color: #00FFC8; margin-top: 10px; }
-    .match-tag { background: #064E3B; color: #34D399; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
 # --- NÚCLEO DE INTELIGÊNCIA AUTOMÁTICA ---
 def auto_train_lexicon(headline):
-    """A IA analisa a criticidade e grava o peso automaticamente"""
     try:
         prompt = f"""Analise a manchete: '{headline}'. 
         1. Extraia a expressão técnica principal.
         2. Atribua um peso de impacto no WTI (-1.0 a 1.0).
         Responda apenas JSON: {{"termo": "expressao", "peso": 0.0, "analise": "motivo"}}"""
         
-        # Modelo corrigido para evitar erro 404
         response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
         data = json.loads(response.text)
         
@@ -87,7 +91,6 @@ def fetch_news():
                 title = entry.title
                 if not any(x in title.lower() for x in ["oil", "wti", "crude"]): continue
                 
-                # Autotreinamento e Match
                 peso_ia, analise_ia = auto_train_lexicon(title)
                 
                 news_list.append({
@@ -106,7 +109,6 @@ def fetch_news():
         new_df = pd.DataFrame(news_list)
         if os.path.exists(AUDIT_CSV):
             old_df = pd.read_csv(AUDIT_CSV)
-            # Garantir ordenação temporal correta
             combined = pd.concat([old_df, new_df]).drop_duplicates(subset=['Manchete']).sort_values(by="Timestamp", ascending=False)
             combined.to_csv(AUDIT_CSV, index=False)
         else: new_df.to_csv(AUDIT_CSV, index=False)
@@ -142,18 +144,16 @@ def main():
 
         if not df.empty:
             st.markdown("<br>", unsafe_allow_html=True)
-            # Aplicando width='stretch' conforme regra de 2026
-            st.dataframe(df.head(15)[["Data", "Match", "Manchete"]], width='stretch', hide_index=True)
+            # Aplicando largura corrigida e tema dark forçado via CSS
+            st.dataframe(df.head(15)[["Data", "Match", "Manchete"]], width=None, use_container_width=True, hide_index=True)
 
     with t2:
         st.markdown("### 🔍 Professional Audit Trail")
         if not df.empty:
-            # Tabela Audit completa com largura corrigida e estilo cyberpunk
-            st.dataframe(df, width='stretch', hide_index=True)
+            st.dataframe(df, width=None, use_container_width=True, hide_index=True)
 
     with t3:
         st.markdown("### 🧠 Autonomous Intelligence Training")
-        st.info("O Lexicon agora é alimentado automaticamente pelo Gemini baseado na criticidade das notícias.")
         if os.path.exists(VERIFIED_FILE):
             with open(VERIFIED_FILE, 'r') as f: verified = json.load(f)
             st.json(verified)
