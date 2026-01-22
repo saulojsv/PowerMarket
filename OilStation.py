@@ -18,7 +18,7 @@ from streamlit_autorefresh import st_autorefresh
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.9.1", layout="wide")
+st.set_page_config(page_title="XTI NEURAL | TERMINAL v12.0", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS PERSONALIZADO ---
@@ -114,11 +114,10 @@ def get_market_data():
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.9.1 // BUG FIX >")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v12.0 // STABLE BUILD >")
     
     headlines_data = auto_scan_real_news(engine.oil_sources)
     
-    # CORREÇÃO DA CHAVE: Unificando 'title' como fonte da notícia
     analysis_results = []
     for item in headlines_data:
         s, l, sum_ = engine.get_deep_analysis(item['title'], item['url'])
@@ -137,7 +136,6 @@ def main():
         with col_feed:
             st.write(f"🛰️ **FEED ATIVO ({len(analysis_results)} Notícias)**")
             for item in analysis_results:
-                # Sanitização robusta para evitar erros de renderização
                 title_text = item.get('title', 'Unknown News')
                 display_h = re.sub(r'[^\w\s\-\(\)\.\,\']', '', title_text)[:85]
                 label = item.get('l', 'NEUTRAL')
@@ -168,7 +166,9 @@ def main():
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0),
                                   xaxis=dict(visible=False), yaxis=dict(side="right", gridcolor="#111", autorange=True),
                                   paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                
+                # AJUSTE: use_container_width substituído por width='stretch'
+                st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
     with tab_neural:
         for res in analysis_results:
