@@ -15,7 +15,8 @@ client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 # --- 1. CONFIGURAÇÃO ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-st_autorefresh(interval=60000, key="v80_refresh") 
+# Atualização automática a cada 60 segundos
+st_autorefresh(interval=60000, key="v90_refresh") 
 
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
@@ -58,7 +59,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LEXICONS ---
+# --- 2. LOGICA DE DADOS ---
 LEXICON_TOPICS = {
     r"war|attack|missile|conflict|escalation|invasion": [9.8, 1],
     r"iran|strait of hormuz|red sea|houthis|tehran": [9.8, 1],
@@ -75,10 +76,7 @@ LEXICON_TOPICS = {
 NEWS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
     "Investing": "https://www.investing.com/rss/news_11.rss",
-    "Reuters": "https://www.reutersagency.com/feed/?best-topics=business&post_type=best",
-    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
     "Yahoo": "https://finance.yahoo.com/rss/headline?s=CL=F",
-    "EIA": "https://www.eia.gov/about/rss/todayinenergy.xml",
     "FT": "https://www.ft.com/commodities?format=rss"
 }
 
@@ -93,10 +91,12 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
+        # Prompt otimizado para extrair fatos e remover ruído
         prompt = (
             f"Analise impacto no WTI: '{title}'. "
-            "Remova ruído. Extraia EXPRESSÕES (ex: 'Refinery shutdown', 'API inventory build'). "
-            "Seja agressivo no viés: 1 (Alta), -1 (Baixa), 0 (Neutro). "
+            "1. Remova ruídos (nomes de autores, 'clique aqui'). "
+            "2. Extraia EXPRESSÕES técnicas (ex: 'Refinery shutdown', 'OPEC quota breach'). "
+            "3. Viés: 1 (Alta), -1 (Baixa), 0 (Neutro). "
             "Responda APENAS JSON: {\"alpha\": 1/-1/0, \"termos\": [\"Expressão 1\"]}"
         )
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
@@ -123,19 +123,20 @@ def fetch_news():
                         break
                 
                 for v_term, v_dir in verified.items():
-                    if v_term in title_low:
+                    if v_term.lower() in title_low:
                         lex_dir = v_dir
                         break
 
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
+                # Coleta de novas expressões para a aba Training
                 for t in ai_data.get("termos", []):
                     t = t.lower().strip()
                     if len(t) > 3 and t not in verified and t not in memory:
                         memory[t] = {"alpha": ai_dir, "news": entry.title[:60]}
                 
-                alpha_final = (lex_dir * 8.0) + (ai_dir * 4.0)
+                alpha_final = (lex_dir * 10.0) + (ai_dir * 4.0)
                 status = "CONFLUÊNCIA" if (ai_dir == lex_dir and ai_dir != 0) else "NEUTRO" if (ai_dir == 0 and lex_dir == 0) else "DIVERGÊNCIA"
                 
                 news_list.append({
@@ -158,7 +159,11 @@ def get_market_metrics():
     except:
         return {"WTI": 75.0, "CAD": 1.38, "Z": 0.0, "status": "MKT_OFFLINE"}
 
+# --- 3. INTERFACE ---
 def main():
+    # Roda a inteligência periodicamente
+    fetch_news()
+    
     mkt = get_market_metrics()
     df_audit = pd.read_csv("Oil_Station_Audit.csv") if os.path.exists("Oil_Station_Audit.csv") else pd.DataFrame()
     memory = load_json(MEMORY_FILE)
@@ -167,16 +172,11 @@ def main():
     avg_alpha = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
     ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
 
-    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V80 MAX</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V90 EVO</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
     
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
     with t1:
-        if st.button("🔄 FORÇAR ATUALIZAÇÃO E ANÁLISE"):
-            with st.spinner("IA reanalisando viés e expressões..."):
-                fetch_news()
-                st.rerun()
-
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
         c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
@@ -198,10 +198,9 @@ def main():
                 st.markdown(f'<div class="scroll-container">{html}</table></div>', unsafe_allow_html=True)
 
     with t2:
-        st.subheader("🕵️ Auditoria de Viés (Sinalização)")
+        st.subheader("🕵️ Auditoria de Viés (IA vs Lexicons)")
         if not df_audit.empty:
             col_lex, col_ai = st.columns(2)
-            
             with col_lex:
                 st.markdown("### 📘 Interpretação Lexicons")
                 lex_html = "<table><tr><th>Manchete</th><th>Viés</th></tr>"
@@ -221,15 +220,16 @@ def main():
                 st.markdown(ai_html + "</table>", unsafe_allow_html=True)
 
     with t3:
-        st.subheader("🧠 Treinamento de Inteligência")
+        st.subheader("🧠 Treinamento Contínuo")
+        st.info("Novas expressões são capturadas automaticamente a cada minuto.")
         cl, cr = st.columns(2)
         with cl:
-            st.markdown("✅ **Dicionário Validado (Lexicons)**")
+            st.markdown("✅ **Dicionário Validado**")
             for term, val in sorted(verified.items()):
-                st.markdown(f'<div class="learned-box">{term.upper()} (Viés: {"Alta" if val>0 else "Baixa"})</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="learned-box">{term.upper()} (Viés: {"Alta" if val>0 else "Baixa" if val<0 else "Neutro"})</div>', unsafe_allow_html=True)
                 
         with cr:
-            st.markdown("💡 **Expressões Sugeridas (Fatos Reais)**")
+            st.markdown("💡 **Sugestões da IA (Novos Fatos)**")
             for term, data in list(memory.items())[:15]:
                 with st.container():
                     col_txt, col_v = st.columns([4, 1])
