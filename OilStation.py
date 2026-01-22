@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import yfinance as yf
 import re
 import newspaper
-from newspaper import Article
+from newspaper import Article, Config
 from google import genai
 from streamlit_autorefresh import st_autorefresh
 
@@ -17,9 +17,13 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.7", layout="wide")
-
-# Gatilho de 60 segundos para refresh total do script
 st_autorefresh(interval=60000, key="auto_refresh")
+
+# Configuração de emulação de navegador para evitar bloqueios
+agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+config = Config()
+config.browser_user_agent = agent
+config.request_timeout = 15
 
 # --- CSS PERSONALIZADO ---
 st.markdown("""
@@ -69,92 +73,83 @@ class XTINeuralEngine:
 
     def get_deep_analysis(self, title, full_text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
-        if not full_text or len(full_text) < 100: return 0.0, "NEUTRAL", "Fonte Bloqueada ou Incompleta"
+        
+        # Sistema de Fallback: Se o texto for curto (bloqueio), analisa pelo título
+        is_fallback = len(full_text) < 200
+        analysis_content = f"HEADLINE: {title}" if is_fallback else f"CONTENT: {full_text[:2500]}"
         
         try:
-            contexto = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
-            prompt = (f"Analyze the following text regarding WTI Crude Oil Market Sentiment.\n"
-                      f"Context Lexicons: {contexto}\n"
-                      f"Article Title: {title}\n"
-                      f"Article Content: {full_text[:3000]}\n\n"
-                      f"Return format:\nSCORE: [value between -1.0 and 1.0]\nLABEL: [BULLISH, BEARISH, or NEUTRAL]\nSUMMARY: [one technical sentence]")
+            prompt = (f"Analyze WTI Oil Sentiment.\n"
+                      f"{analysis_content}\n\n"
+                      f"Return strictly:\nSCORE: [float -1.0 to 1.0]\nLABEL: [BULLISH/BEARISH/NEUTRAL]\nSUMMARY: [1 tech sentence]")
             
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
             res_text = response.text
             
-            score_match = re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text)
-            label_match = re.search(r"LABEL:\s*(\w+)", res_text)
-            summary_match = re.search(r"SUMMARY:\s*(.*)", res_text)
+            score = float(re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text).group(1))
+            label = re.search(r"LABEL:\s*(\w+)", res_text).group(1).upper()
+            summary = re.search(r"SUMMARY:\s*(.*)", res_text).group(1).strip()
             
-            score = float(score_match.group(1)) if score_match else 0.0
-            label = label_match.group(1).upper() if label_match else "NEUTRAL"
-            summary = summary_match.group(1).strip() if summary_match else "Sem resumo disponível"
+            if is_fallback: summary = "(Headline Analysis) " + summary
             
             return score, label, summary
         except:
-            return 0.0, "NEUTRAL", "Falha na análise neural"
+            return 0.0, "NEUTRAL", "Falha no parsing neural"
 
-# TTL reduzido para 60s para acompanhar o refresh da página
 @st.cache_data(ttl=60)
 def auto_scan_real_news(sources):
     collected = []
-    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec', 'gasoline']
+    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec']
     
     for site_url in sources:
         try:
-            paper = newspaper.build(site_url, memoize_articles=False, language='en')
+            # Aplicando a config de Anti-Bloqueio
+            paper = newspaper.build(site_url, config=config, memoize_articles=False)
             count = 0
             for article in paper.articles:
                 if count >= 3: break
-                url_clean = article.url.lower()
-                if any(kw in url_clean for kw in keywords):
+                if any(kw in article.url.lower() for kw in keywords):
                     try:
                         article.download()
                         article.parse()
-                        clean_text = article.text.replace('\n', ' ').strip()
-                        if len(clean_text) > 300:
-                            collected.append({
-                                "title": article.title,
-                                "text": clean_text,
-                                "url": article.url
-                            })
-                            count += 1
+                        collected.append({
+                            "title": article.title,
+                            "text": article.text.strip(),
+                            "url": article.url
+                        })
+                        count += 1
                     except: continue
         except: continue
     return collected
 
-@st.cache_data(ttl=30) # Preço atualiza mais rápido que as notícias
+@st.cache_data(ttl=30)
 def get_market_data():
     try:
         xti = yf.download("CL=F", period="2d", interval="1m", progress=False)
         if not xti.empty:
-            last_price = float(xti['Close'].iloc[-1])
-            prev_price = float(xti['Close'].iloc[-2])
-            delta = last_price - prev_price
-            return xti, last_price, delta
-    except Exception:
-        pass
+            last = float(xti['Close'].iloc[-1])
+            delta = last - float(xti['Close'].iloc[-2])
+            return xti, last, delta
+    except: pass
     return pd.DataFrame(), 0.0, 0.0
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // LIVE SCAN 60s >")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // ANTI-BLOCK ACTIVE >")
     
     headlines_data = auto_scan_real_news(engine.oil_sources)
     analysis_results = []
     
     for item in headlines_data:
-        score, label, summary = engine.get_deep_analysis(item['title'], item['text'])
-        analysis_results.append({"h": item['title'], "url": item['url'], "s": score, "l": label, "sum": summary})
+        s, l, sum_ = engine.get_deep_analysis(item['title'], item['text'])
+        analysis_results.append({"h": item['title'], "url": item['url'], "s": s, "l": l, "sum": sum_})
 
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
     with tab_home:
         col_feed, col_market = st.columns([1.8, 1])
         with col_feed:
-            st.write(f"🛰️ **LIVE ARTICLE FEED ({len(headlines_data)} Notícias)**")
-            if not headlines_data:
-                st.info("Varredura em curso... Aguardando novos blocos de dados.")
+            st.write(f"🛰️ **FEED ATIVO ({len(headlines_data)} Notícias)**")
             for item in analysis_results:
                 st.markdown(f'''
                     <div class="news-card-mini {item['l']}">
@@ -167,15 +162,13 @@ def main():
                 ''', unsafe_allow_html=True)
 
         with col_market:
-            xti_data, spot_price, delta_val = get_market_data()
+            xti_data, price, delta = get_market_data()
             avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
             veredito = "BUY" if avg_score > 0.1 else "SELL" if avg_score < -0.1 else "HOLD"
             v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
             
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
-            
-            # Metric com Delta (variação em relação ao último minuto)
-            st.metric("WTI SPOT", f"${float(spot_price):.2f}", delta=f"{delta_val:.2f}")
+            st.metric("WTI SPOT", f"${price:.2f}", delta=f"{delta:.2f}")
             
             if not xti_data.empty:
                 fig = go.Figure(go.Scatter(y=xti_data['Close'].values, line=dict(color='#00FF41', width=3)))
@@ -185,8 +178,8 @@ def main():
     with tab_neural:
         for res in analysis_results:
             with st.expander(f"DEEP READ: {res['h']}"):
-                st.write(f"**Análise da IA:** {res['sum']}")
-                st.write(f"**Sentiment Score:** {res['s']}")
+                st.write(f"**Resultado:** {res['sum']}")
+                st.write(f"**Score:** {res['s']}")
 
 if __name__ == "__main__":
     main()
