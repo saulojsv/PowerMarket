@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.6", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
-# --- CSS PERSONALIZADO (SEM SIDEBAR) ---
+# --- CSS PERSONALIZADO (SEM SIDEBAR - FOCO TOTAL) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -29,7 +29,6 @@ st.markdown("""
         background-color: #0a0a0a; border: 1px solid #1a1a1a; 
         padding: 12px; margin-bottom: 8px; border-radius: 4px;
         display: flex; justify-content: space-between; align-items: center;
-        border-left: 4px solid #333;
     }
     .label-tag { font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; }
     .BULLISH { color: #00FF41; border: 1px solid #00FF41; border-left: 4px solid #00FF41 !important; }
@@ -51,6 +50,7 @@ st.markdown("""
 
 class XTINeuralEngine:
     def __init__(self):
+        # Acesso via Secrets
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
@@ -81,7 +81,7 @@ class XTINeuralEngine:
 @st.cache_data(ttl=300)
 def auto_scan(sources):
     collected = []
-    for url in sources[:10]:
+    for url in sources[:10]: # Limite de 10 sites
         try:
             a = Article(url); a.download(); a.parse()
             if len(a.title) > 10: collected.append(a.title)
@@ -107,6 +107,7 @@ def main():
         
         with col_feed:
             st.write("🛰️ **LIVE RESUME FEED**")
+            # Agora as notícias aparecem resumidas na dashboard como solicitado
             for item in analysis_results:
                 st.markdown(f"""
                     <div class="news-card-mini {item['l']}">
@@ -125,12 +126,14 @@ def main():
             veredito = "BUY" if avg_score > 0.15 else "SELL" if avg_score < -0.15 else "HOLD"
             v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
             
+            # Veredito e confiança
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
             st.metric("WTI SPOT", f"${price:.2f}")
             
             if not xti.empty:
                 fig = go.Figure(go.Scatter(y=xti['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
+                # Padrão 2026: width='stretch'
                 st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
     with tab_neural:
@@ -143,11 +146,9 @@ def main():
             st.markdown(" ".join([f'<span class="lexicon-chip">{k}</span>' for k in engine.bullish_keywords.keys()]), unsafe_allow_html=True)
             st.write("Bearish:")
             st.markdown(" ".join([f'<span class="lexicon-chip" style="border-color:#FF3131; color:#FF3131;">{k}</span>' for k in engine.bearish_keywords.keys()]), unsafe_allow_html=True)
-            st.write("**FONTES MONITORADAS:**")
-            for site in engine.oil_sources: st.code(site)
 
         with c2:
-            st.markdown("**DECISÕES DETALHADAS DA IA:**")
+            st.markdown("**DECISÕES DETALHADAS DA IA (DEEP READER):**")
             for res in analysis_results:
                 with st.expander(f"DECISÃO: {res['l']} | SCORE: {res['s']:+.2f}"):
                     st.write(f"**Manchete:** {res['h']}")
