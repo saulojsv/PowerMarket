@@ -15,7 +15,7 @@ from googleapiclient.http import MediaFileUpload
 
 # --- CONFIGURAÇÃO DE CHAVES ---
 client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
-SERVICE_ACCOUNT_FILE = 'oilstation-485112-ac2d104d1370.json' # Arquivo para o Drive
+SERVICE_ACCOUNT_FILE = 'oilstation-485112-ac2d104d1370.json' 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 # --- 1. CONFIGURAÇÃO ESTÉTICA ---
@@ -25,6 +25,7 @@ st_autorefresh(interval=60000, key="v92_refresh")
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 AUDIT_CSV = "Oil_Station_Audit.csv"
+REPORT_MARKER = "last_report_date.txt"
 
 # Fontes Expandidas
 NEWS_SOURCES = {
@@ -59,16 +60,19 @@ st.markdown("""
 # --- 2. LOGICA DE DRIVE ---
 def upload_to_drive():
     if not os.path.exists(SERVICE_ACCOUNT_FILE):
-        st.error("Arquivo JSON do Google Drive não encontrado.")
-        return
+        return False
+    if not os.path.exists(AUDIT_CSV):
+        return False
     try:
         creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
         service = build('drive', 'v3', credentials=creds)
-        file_metadata = {'name': f"Audit_Oil_{datetime.now().strftime('%Y-%m-%d')}.csv"}
+        file_name = f"Audit_Oil_{datetime.now().strftime('%Y-%m-%d')}.csv"
+        file_metadata = {'name': file_name}
         media = MediaFileUpload(AUDIT_CSV, mimetype='text/csv')
         service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        st.success("Relatório salvo no Drive!")
-    except Exception as e: st.error(f"Erro no Drive: {e}")
+        return True
+    except:
+        return False
 
 # --- 3. LOGICA DE DADOS ---
 OIL_MANDATORY_TERMS = ["oil", "wti", "crude", "brent", "opec", "inventory", "tengiz", "production"]
@@ -83,38 +87,74 @@ def get_market_metrics():
 
 def fetch_news():
     news_list = []
-    verified = {} # Carregaria do JSON (load_json)
+    # Tentativa de carregar lexicons verificados
+    verified = {}
+    if os.path.exists(VERIFIED_FILE):
+        try:
+            with open(VERIFIED_FILE, 'r') as f: verified = json.load(f)
+        except: pass
     
     for source, url in NEWS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:6]:
+            for entry in feed.entries[:8]:
                 title = entry.title
                 title_low = title.lower()
                 if not any(t in title_low for t in OIL_MANDATORY_TERMS): continue
                 
-                # Data da Notícia
                 dt_parsed = entry.get('published_parsed', datetime.now().timetuple())
                 dt_str = datetime(*dt_parsed[:6]).strftime("%d/%m %H:%M")
 
-                # Lógica simplificada de Viés (Integrar com Gemini conforme anterior)
-                ai_dir = 1 if "cut" in title_low else -1 if "build" in title_low else 0
+                # Lógica de Viés Integrada
+                lex_dir = 0
+                for expr, val in verified.items():
+                    if expr.lower() in title_low:
+                        lex_dir = val
+                        break
+                
+                ai_dir = 1 if any(x in title_low for x in ["cut", "rise", "tight"]) else -1 if any(x in title_low for x in ["build", "fall", "glut"]) else 0
                 
                 news_list.append({
                     "Data": dt_str,
                     "Fonte": source,
                     "Manchete": title,
                     "Link": entry.link,
-                    "Lexicon_Bias": 0,
+                    "Lexicon_Bias": lex_dir,
                     "AI_Bias": ai_dir,
-                    "Alpha": ai_dir * 4.0
+                    "Alpha": (lex_dir * 10.0) + (ai_dir * 4.0)
                 })
         except: continue
-    if news_list: pd.DataFrame(news_list).to_csv(AUDIT_CSV, index=False)
+    
+    if news_list:
+        new_df = pd.DataFrame(news_list)
+        if os.path.exists(AUDIT_CSV):
+            old_df = pd.read_csv(AUDIT_CSV)
+            # Acumula e remove duplicatas pela manchete para manter o histórico do dia
+            combined = pd.concat([old_df, new_df]).drop_duplicates(subset=['Manchete'], keep='first')
+            combined.to_csv(AUDIT_CSV, index=False)
+        else:
+            new_df.to_csv(AUDIT_CSV, index=False)
+
+def auto_report_handler():
+    """Gatilho para as 00:00h"""
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    
+    if now.hour == 0 and now.minute <= 2: # Janela de 2 min para garantir o disparo no refresh
+        last_date = ""
+        if os.path.exists(REPORT_MARKER):
+            with open(REPORT_MARKER, "r") as f: last_date = f.read().strip()
+        
+        if last_date != today_str:
+            if upload_to_drive():
+                with open(REPORT_MARKER, "w") as f: f.write(today_str)
+                # Opcional: limpa o arquivo para o novo dia após o backup
+                # if os.path.exists(AUDIT_CSV): os.remove(AUDIT_CSV)
 
 # --- 4. INTERFACE ---
 def main():
     fetch_news()
+    auto_report_handler()
     mkt = get_market_metrics()
     df = pd.read_csv(AUDIT_CSV) if os.path.exists(AUDIT_CSV) else pd.DataFrame()
     
@@ -140,16 +180,22 @@ def main():
             st.plotly_chart(fig, width='stretch')
         
         with cr:
-            st.markdown("**LIVE NEWS FEED**")
+            st.markdown("**LIVE NEWS FEED (ACCUMULATED)**")
             if not df.empty:
                 n_html = '<div class="scroll-box"><table class="terminal-table">'
-                for _, r in df.iterrows():
+                # Mostra as mais recentes primeiro no feed visual
+                for _, r in df.iloc[::-1].iterrows():
                     n_html += f"<tr><td style='color:#64748B; font-size:10px;'>{r['Data']}</td><td>{r['Manchete']}</td><td><a href='{r['Link']}' class='link-btn' target='_blank'>LINK</a></td></tr>"
                 st.markdown(n_html + "</table></div>", unsafe_allow_html=True)
 
     with t2:
         st.markdown("### 🔍 Professional Sentiment Audit")
-        if st.button("🚀 Backup Audit to Google Drive"): upload_to_drive()
+        col_btn1, col_btn2 = st.columns([1, 4])
+        with col_btn1:
+            if st.button("🚀 Manual Backup"):
+                if upload_to_drive(): st.success("Drive OK!")
+                else: st.error("Drive Fail!")
+        
         if not df.empty:
             audit_html = """<table class="terminal-table"><tr><th>DATA</th><th>FONTE</th><th>MANCHETE</th><th>LEXICON</th><th>AI</th><th>ALPHA</th></tr>"""
             for _, r in df.iterrows():
@@ -159,11 +205,10 @@ def main():
                     <td><small>{r['Data']}</small></td>
                     <td style="color:#94A3B8">{r['Fonte']}</td>
                     <td>{r['Manchete']}</td>
-                    <td><span class="bias-tag {l_cls}">BIAS</span></td>
-                    <td><span class="bias-tag {a_cls}">BIAS</span></td>
+                    <td><span class="bias-tag {l_cls}">{"UP" if r['Lexicon_Bias']>0 else "DOWN" if r['Lexicon_Bias']<0 else "MID"}</span></td>
+                    <td><span class="bias-tag {a_cls}">{"UP" if r['AI_Bias']>0 else "DOWN" if r['AI_Bias']<0 else "MID"}</span></td>
                     <td style="color:#00FFC8; font-weight:bold;">{r['Alpha']:.1f}</td>
                 </tr>"""
             st.markdown(audit_html + "</table>", unsafe_allow_html=True)
 
 if __name__ == "__main__": main()
-
