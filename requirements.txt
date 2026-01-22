@@ -3,6 +3,6 @@ pandas
 numpy
 plotly
 yfinance
-feedparser
 google-generativeai
+newspaper3k
 streamlit-autorefresh
