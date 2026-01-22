@@ -1,10 +1,11 @@
 import sys
 import warnings
+import json
 
-# Bloqueia avisos de sintaxe obsoleta em bibliotecas de terceiros
+# Silencia SyntaxWarnings internos de bibliotecas de terceiros
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
-# PATCH DE COMPATIBILIDADE: lxml.html.clean (Essencial para Python 3.13)
+# PATCH DE COMPATIBILIDADE: lxml.html.clean
 try:
     import lxml.html.clean
 except ImportError:
@@ -19,28 +20,33 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
-import json
-import os
 import re
 from datetime import datetime
 from newspaper import Article
-from google import genai # Atualizado para nova SDK
+from google import genai # Nova SDK do Google (v2026)
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIGURAÇÃO DE INTERFACE ---
-st.set_page_config(page_title="XTI NEURAL | TERMINAL v10.6", layout="wide")
-# Intervalo de 2 min para evitar bloqueio do Yahoo Finance (Rate Limit)
-st_autorefresh(interval=120000, key="terminal_refresh")
+st.set_page_config(page_title="XTI NEURAL | TERMINAL v10.9", layout="wide")
+st_autorefresh(interval=60000, key="terminal_refresh")
 
-# --- CSS PROFISSIONAL (Mantido conforme solicitado) ---
+# --- CSS PROFISSIONAL (DARK TOTAL - MANTIDO) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
     .main { background-color: #000000 !important; }
     [data-testid="stAppViewContainer"] { background-color: #000000; }
     header, [data-testid="stHeader"] { background-color: #000000; }
-    div[data-baseweb="textarea"] { background-color: #0a0a0a !important; border-radius: 8px; }
-    textarea { background-color: #0a0a0a !important; color: #00FF41 !important; font-family: 'JetBrains Mono' !important; }
+    div[data-baseweb="textarea"], div[data-baseweb="input"] { 
+        background-color: #0a0a0a !important; 
+        border-radius: 8px; 
+        border: 1px solid #1a1a1a !important; 
+    }
+    textarea, input { 
+        background-color: #0a0a0a !important; 
+        color: #00FF41 !important; 
+        font-family: 'JetBrains Mono' !important; 
+    }
     .news-card { 
         background-color: #0a0a0a; border: 1px solid #333333; border-left: 5px solid #00FF41; 
         padding: 18px; margin-bottom: 12px; border-radius: 6px;
@@ -49,6 +55,9 @@ st.markdown("""
         font-size: 0.7rem; color: #000; background: #00FF41; 
         padding: 2px 6px; border-radius: 3px; font-weight: bold; margin-bottom: 5px; display: inline-block;
     }
+    .news-title { font-weight: 700; color: #ffffff !important; display: block; margin-bottom: 5px; }
+    .news-ai { font-size: 0.85rem; color: #00FF41; font-weight: bold; }
+    .news-ai-bear { color: #FF3131 !important; }
     .status-box { 
         border: 2px solid #00FF41; padding: 40px; text-align: center; font-weight: 800; 
         text-transform: uppercase; font-size: 2.2rem; background-color: #050505;
@@ -58,52 +67,47 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 class XTINeuralEngine:
-    def __init__(self):
+    def __init__(self, api_key=None):
         self.risk_threshold = 0.70
-        # BUSCA AUTOMÁTICA NOS SECRETS (Para não precisar colar toda vez)
-        self.api_key = st.secrets.get("GEMINI_API_KEY")
-        if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
-            self.model_id = "gemini-1.5-flash"
-        else:
-            self.client = None
-        self.load_lexicons()
+        self.client = genai.Client(api_key=api_key) if api_key else None
+        self.model_id = "gemini-1.5-flash"
+        self.load_lexicons_from_json()
 
-    def load_lexicons(self):
-        self.bullish_keywords = {
-            "production cut": 0.8, "inventory draw": 0.7, "opec quota": 0.5,
-            "supply disruption": 0.9, "demand growth": 0.6, "refinery outage": 0.5,
-            "geopolitical tension": 0.8, "sanctions": 0.7, "rig count decrease": 0.4,
-            "export ban": 0.8, "soft landing": 0.4, "crude imports": 0.3, "output freeze": 0.6
-        }
-        self.bearish_keywords = {
-            "inventory build": -0.6, "shale output": -0.4, "strategic reserve": -0.3,
-            "interest rate hike": -0.5, "dollar strength": -0.4, "oil glut": -0.9,
-            "rig count increase": -0.3, "recession fears": -0.8, "well completion": -0.3,
-            "drilling productivity": -0.4, "upstream investment": -0.2, "fuel switching": -0.3,
-            "industrial activity contraction": -0.7, "electric vehicle penetration": -0.5
-        }
+    def load_lexicons_from_json(self):
+        """Carrega léxicos e sites do arquivo verificado pelo usuário"""
+        try:
+            with open('verified_lexicons.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.bullish_keywords = data.get('bullish', {})
+                self.bearish_keywords = data.get('bearish', {})
+                self.oil_sources = data.get('sites', [])
+                st.sidebar.success("✅ CORE: verified_lexicons.json LOADED")
+        except:
+            st.sidebar.error("⚠️ verified_lexicons.json não encontrado. Usando léxicos base.")
+            # Fallback (seu código original)
+            self.bullish_keywords = {"production cut": 0.8, "inventory draw": 0.7}
+            self.bearish_keywords = {"inventory build": -0.6, "shale output": -0.4}
+            self.oil_sources = []
 
     def scrap_full_article(self, url):
         try:
             article = Article(url)
-            article.download()
-            article.parse()
+            article.download(); article.parse()
             return article.text[:4000]
-        except:
-            return None
+        except: return None
 
     def get_deep_neural_analysis(self, content, is_url=False):
         if not self.client: return 0.0, "AI INACTIVE"
         try:
-            role = "Analista Senior de Petróleo"
-            prompt = f"Como {role}, analise este {'artigo' if is_url else 'título'}: {content}. Retorne [SCORE: valor de -1.0 a 1.0] e [RESUMO: 1 frase]."
+            # Envia os lexicons para a IA aprender o padrão de classificação
+            context_lex = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
+            prompt = f"Como Analista Senior (WTI), considere estes léxicos base: {context_lex}. Analise o impacto para: {content}. Retorne [SCORE: -1.0 a 1.0] e [RESUMO: 1 frase]."
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
             score_match = re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)
             score = float(score_match[0]) if score_match else 0.0
-            summary = response.text.split("RESUMO:")[-1].strip() if "RESUMO:" in response.text else "Análise concluída."
+            summary = response.text.split("RESUMO:")[-1].strip() if "RESUMO:" in response.text else "Processado."
             return score, summary
-        except: return 0.0, "Erro na leitura neural."
+        except: return 0.0, "Falha neural."
 
     def process_input(self, text):
         is_url = bool(re.match(r'^https?://', text.strip()))
@@ -112,48 +116,57 @@ class XTINeuralEngine:
             if content:
                 score, summary = self.get_deep_neural_analysis(content, is_url=True)
                 return score, "DEEP READER", summary, text[:50]+"..."
-            return 0.0, "ERROR", "URL bloqueada.", text
+            return 0.0, "ERROR", "URL inacessível.", text
         else:
-            lexicon_impact = 0.0
-            all_terms = {**self.bullish_keywords, **self.bearish_keywords}
-            for word in sorted(all_terms.keys(), key=len, reverse=True):
-                if word in text.lower():
-                    lexicon_impact += all_terms[word]
+            lex_impact = sum(v for k, v in {**self.bullish_keywords, **self.bearish_keywords}.items() if k in text.lower())
             score, summary = self.get_deep_neural_analysis(text, is_url=False)
-            final_impact = (lexicon_impact + score) / 2
-            return final_impact, "LEXICON+AI", summary, text
+            return (lex_impact + score) / 2, "LEXICON+AI", summary, text
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=60)
 def get_market_intelligence():
     try:
-        # Timeout para evitar que o app trave em caso de lentidão do Yahoo
-        xti = yf.download("CL=F", period="2d", interval="5m", progress=False, timeout=10)
-        dxy = yf.download("DX-Y.NYB", period="2d", interval="5m", progress=False, timeout=10)
-        if xti.empty: return None, 0.0
+        xti = yf.download("CL=F", period="2d", interval="5m", progress=False)
+        dxy = yf.download("DX-Y.NYB", period="2d", interval="5m", progress=False)
+        if xti.empty or dxy.empty: return None, 0.0
         prices = xti['Close'].iloc[:, 0].dropna().tolist()
-        dxy_pct = dxy['Close'].iloc[:, 0].pct_change().iloc[-1] if not dxy.empty else 0.0
+        dxy_pct = dxy['Close'].iloc[:, 0].pct_change().iloc[-1]
         return prices, float(dxy_pct)
     except: return None, 0.0
 
 def main():
-    engine = XTINeuralEngine()
-    
+    if 'manual_corpus' not in st.session_state:
+        st.session_state.manual_corpus = ""
+
     with st.sidebar:
-        st.markdown(f"### 🛰️ STATUS: {'🟢 ACTIVE' if engine.client else '🔴 NO API KEY'}")
-        if not engine.client:
-            st.warning("AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
-        st.markdown("---")
-        if st.button("LIMPAR TERMINAL"): st.rerun()
-        manual_corpus = st.text_area("Corpus (Cole URLs ou Manchetes):", height=300)
+        st.markdown("### 🛰️ UPLINK: JSON CORE")
+        gemini_api = st.text_input("Gemini API Key", type="password")
+        
+        # Botão para varrer sites definidos no seu JSON
+        engine = XTINeuralEngine(api_key=gemini_api)
+        if st.button("🔎 SCAN VERIFIED SITES"):
+            with st.spinner("Varrendo fontes do JSON..."):
+                titles = []
+                for site in engine.oil_sources[:10]:
+                    try:
+                        a = Article(site); a.download(); a.parse()
+                        if a.title: titles.append(a.title)
+                    except: continue
+                st.session_state.manual_corpus = "\n".join(titles)
+
+        if st.button("Limpar Corpus"): 
+            st.session_state.manual_corpus = ""
+            st.rerun()
+
+        manual_corpus = st.text_area("Corpus (URLs ou Manchetes):", value=st.session_state.manual_corpus, height=300)
         dxy_manual = st.slider("DXY Fix (%)", -2.0, 2.0, -0.25)
 
-    st.markdown(f"### < XTI/USD NEURAL TERMINAL v10.6 // DEEP READER >")
+    st.markdown(f"### < XTI/USD NEURAL TERMINAL v10.9 // JSON CORE >")
     
     prices_raw, dxy_auto = get_market_intelligence()
     dxy_delta = dxy_manual / 100 if dxy_manual != -0.25 else dxy_auto
     
     if not prices_raw:
-        st.error("⚠️ DATA UPLINK FAILURE (Rate Limit). Aguarde o reset do Yahoo."); prices = [0.0, 0.0]; z_score = 0.0
+        st.warning("Aguardando dados..."); prices = [0.0, 0.0]; z_score = 0.0
     else:
         prices = prices_raw
         series = pd.Series(prices)
@@ -165,18 +178,17 @@ def main():
     col_news, col_verdict = st.columns([1.8, 1])
 
     with col_news:
-        if not inputs: st.info("Aguardando entrada de dados no Corpus...")
+        if not inputs: st.info("Sincronize o Corpus ou use SCAN VERIFIED SITES.")
         for item in inputs:
-            with st.spinner("Analisando contextualmente..."):
+            with st.spinner("Decodificando contexto..."):
                 score, method, summary, title = engine.process_input(item)
                 impact_sum += score
                 css = "news-ai-bear" if score < 0 else ""
-                color_text = "#FF3131" if score < 0 else "#00FF41"
                 st.markdown(f"""
                     <div class="news-card">
                         <span class="deep-tag">{method}</span>
-                        <div style="color:white; font-weight:bold;">{title}</div>
-                        <div style="color:{color_text}; font-size:0.85rem; margin-top:5px;">IMPACTO: {score:+.2f} >> {summary}</div>
+                        <span class="news-title">{title}</span>
+                        <span class="news-ai {css}">IMPACT: {score:+.2f} >> {summary}</span>
                     </div>
                 """, unsafe_allow_html=True)
 
@@ -186,7 +198,7 @@ def main():
         final_score = (ai_sentiment * 0.45) + (arb_bias * 0.35) + (-np.clip(z_score/3, -1, 1) * 0.20)
         
         color = "#00FF41" if final_score > engine.risk_threshold else "#FF3131" if final_score < -engine.risk_threshold else "#FFFF00"
-        label = "BUY" if final_score > 0.1 else "SELL" if final_score < -0.1 else "HOLD"
+        label = "BUY" if final_score > 0.1 else "SELL" if final_score < -0.1 else "NEUTRAL"
         
         st.markdown(f'<div class="status-box" style="border-color:{color}; color:{color};">{label}<br><span style="font-size:0.8rem; color:white;">CONFIDENCE: {abs(final_score)*100:.1f}%</span></div>', unsafe_allow_html=True)
         
