@@ -1,10 +1,10 @@
 streamlit
+streamlit-autorefresh
 pandas
 numpy
 plotly
 yfinance
-google-genai
-lxml_html_clean
+requests
+beautifulsoup4
 newspaper3k
-streamlit-autorefresh
-
+google-genai
