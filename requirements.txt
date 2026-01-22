@@ -3,6 +3,4 @@ pandas
 numpy
 plotly
 yfinance
-requests
-google-generativeai
-python-dotenv
+feedparser
