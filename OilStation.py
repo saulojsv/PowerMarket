@@ -6,141 +6,192 @@ import yfinance as yf
 import feedparser
 from datetime import datetime
 
-# --- CONFIGURAÇÃO E ESTÉTICA CYBERPUNK ---
-st.set_page_config(page_title="XTI NEURAL AUTO", layout="wide")
+# --- CONFIGURAÇÃO DE INTERFACE PROFISSIONAL ---
+st.set_page_config(page_title="XTI NEURAL | TERMINAL", layout="wide")
 
+# Estilização CSS para Fundo Totalmente Escuro e Tabelas Customizadas
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-    html, body, [class*="css"] { background-color: #050505; color: #00FF41; font-family: 'JetBrains Mono', monospace; }
-    .stMetric { background-color: #0a0a0a; border: 1px solid #00FF41; padding: 15px; box-shadow: 0 0 15px #00FF4122; }
-    .status-box { border: 2px solid #00FF41; padding: 25px; text-align: center; font-weight: bold; text-transform: uppercase; font-size: 1.4rem; background-color: #0d0d0d; }
-    .news-card { background-color: #0a0a0a; border-left: 4px solid #00FF41; padding: 10px; margin-bottom: 5px; font-size: 0.8rem; line-height: 1.2; }
+    
+    /* Fundo Deep Dark */
+    .main { background-color: #000000; }
+    header, [data-testid="stHeader"] { background-color: #000000; }
+    
+    html, body, [class*="css"] { 
+        background-color: #000000; 
+        color: #00FF41; 
+        font-family: 'JetBrains Mono', monospace; 
+    }
+
+    /* Cards de Notícias Profissionais */
+    .news-card { 
+        background-color: #050505; 
+        border: 1px solid #1a1a1a;
+        border-left: 4px solid #00FF41; 
+        padding: 15px; 
+        margin-bottom: 10px; 
+        border-radius: 4px;
+    }
+    .news-title { font-weight: bold; font-size: 0.9rem; color: #ffffff; margin-bottom: 5px; }
+    .news-ai { font-size: 0.75rem; color: #00FF41; text-transform: uppercase; letter-spacing: 1px; }
+    .news-ai-bear { color: #FF3131; }
+
+    /* Métricas e Status */
+    .stMetric { 
+        background-color: #050505 !important; 
+        border: 1px solid #1a1a1a !important; 
+        padding: 20px !important; 
+        border-radius: 5px !important;
+    }
+    .status-box { 
+        border: 1px solid #00FF41; 
+        padding: 30px; 
+        text-align: center; 
+        font-weight: bold; 
+        text-transform: uppercase; 
+        font-size: 1.5rem; 
+        background-color: #050505;
+        box-shadow: inset 0 0 15px #00FF4115;
+    }
+    
+    /* Esconder elementos desnecessários */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
 class XTINeuralEngine:
     def __init__(self):
         self.risk_threshold = 0.70
-        self.weights = {'sentiment': 0.45, 'arbitrage': 0.30, 'math': 0.25}
+        # Definição ampliada de Lexicons
+        self.bullish_keywords = {'cut': 0.4, 'sanction': 0.45, 'war': 0.6, 'tension': 0.3, 'draw': 0.3, 'unrest': 0.35, 'opec': 0.25}
+        self.bearish_keywords = {'increase': -0.3, 'glut': -0.5, 'build': -0.3, 'recession': -0.6, 'surplus': -0.4, 'slowdown': -0.4}
 
     def compute_z_score(self, prices):
         if len(prices) < 5: return 0
         series = pd.Series(prices)
-        # Garantindo que o cálculo de desvio padrão não retorne zero/erro
         std = series.std()
         return (series.iloc[-1] - series.mean()) / std if std != 0 else 0
 
-    def evaluate_news_impact(self, news_list):
-        # 22 Lexicons integrados nas lógicas Bullish/Bearish
-        bullish = {'cut': 0.35, 'sanction': 0.40, 'war': 0.50, 'tension': 0.30, 'draw': 0.25, 'unrest': 0.30}
-        bearish = {'increase': -0.30, 'glut': -0.45, 'build': -0.25, 'recession': -0.50, 'surplus': -0.35}
-        
-        total_score, detected_events = 0.0, []
-        full_text = " ".join(news_list).lower()
-        
-        for word, val in {**bullish, **bearish}.items():
-            if word in full_text:
-                total_score += val
-                detected_events.append((word.upper(), "BULLISH" if val > 0 else "BEARISH"))
-        
-        return np.clip(total_score, -1, 1), detected_events
+    def analyze_single_news(self, title):
+        """Interpretação individual de cada notícia pela IA."""
+        title_low = title.lower()
+        impact = 0.0
+        sentiment = "NEUTRAL / STABLE"
+        css_class = ""
 
-# --- CAPTURA AUTOMÁTICA DE NOTÍCIAS (RSS) ---
+        for word, val in {**self.bullish_keywords, **self.bearish_keywords}.items():
+            if word in title_low:
+                impact += val
+        
+        if impact > 0:
+            sentiment = f"BULLISH | IMPACT: +{impact:.2f}"
+        elif impact < 0:
+            sentiment = f"BEARISH | IMPACT: {impact:.2f}"
+            css_class = "news-ai-bear"
+            
+        return sentiment, css_class, impact
+
+# --- CAPTURA DE DADOS ---
 @st.cache_data(ttl=600)
-def fetch_auto_news():
-    """Varre feeds RSS de energia automaticamente sem intervenção humana."""
-    feeds = [
-        "https://oilprice.com/rss/main",
-        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069"
-    ]
+def fetch_headlines():
+    feeds = ["https://oilprice.com/rss/main", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069"]
     headlines = []
     for url in feeds:
         try:
             f = feedparser.parse(url)
-            for entry in f.entries[:8]:
-                headlines.append(entry.title)
+            for entry in f.entries[:6]: headlines.append(entry.title)
         except: continue
-    # Se falhar, retorna placeholder para evitar erro de execução
-    return headlines if headlines else ["Sincronizando feeds de notícias globais..."]
+    return headlines if headlines else ["Market Data Syncing..."]
+
+@st.cache_data(ttl=300)
+def get_market_intelligence():
+    try:
+        xti = yf.download("CL=F", period="5d", interval="1h", progress=False)
+        dxy = yf.download("DX-Y.NYB", period="2d", interval="1h", progress=False)
+        prices = xti['Close'].iloc[:, 0].tolist() if isinstance(xti['Close'], pd.DataFrame) else xti['Close'].tolist()
+        dxy_pct = dxy['Close'].pct_change().iloc[-1]
+        return prices, dxy_pct
+    except: return [75.0]*10, 0.0
 
 def main():
     engine = XTINeuralEngine()
     
-    st.markdown("### < XTIUSD // NEURAL COMMAND v8.0 - FULL AUTO >")
-    st.write(f"CORE_SYSTEM: ONLINE // {datetime.now().strftime('%H:%M:%S')} // UPLINK: ATIVO")
+    # HEADER TERMINAL
+    st.markdown("### < XTI/USD NEURAL TERMINAL v9.0 >")
+    st.write(f"SISTEMA ATIVO // {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} // UPLINK: GLOBAL FEED")
     st.markdown("---")
 
-    # AUTO FETCH DATA
-    with st.spinner('Sincronizando Lexicons e Mercado...'):
-        headlines = fetch_auto_news()
-        
-        @st.cache_data(ttl=300)
-        def get_market_data():
-            try:
-                # XTI (CL=F) e Índice Dólar (DX-Y.NYB) para arbitragem automática
-                xti = yf.download("CL=F", period="5d", interval="1h", progress=False)
-                dxy = yf.download("DX-Y.NYB", period="2d", interval="1h", progress=False)
-                
-                prices = xti['Close'].iloc[:, 0].tolist() if isinstance(xti['Close'], pd.DataFrame) else xti['Close'].tolist()
-                dxy_val = dxy['Close'].iloc[:, 0] if isinstance(dxy['Close'], pd.DataFrame) else dxy['Close']
-                dxy_pct = dxy_val.pct_change().iloc[-1]
-                
-                return prices, dxy_pct
-            except:
-                return [75.0]*10, 0.0
-
-        prices, dxy_delta = get_market_data()
-
-    # PROCESSAMENTO NEURAL
-    ai_sentiment, events = engine.evaluate_news_impact(headlines)
-    z_score = engine.compute_z_score(prices)
-    arb_bias = np.clip(-dxy_delta * 10, -1, 1) # Correlação inversa DXY/OIL
+    # DATA INGESTION
+    headlines = fetch_headlines()
+    prices, dxy_delta = get_market_intelligence()
     
-    final_score = (ai_sentiment * 0.45) + (arb_bias * 0.30) + (-np.clip(z_score/3, -1, 1) * 0.25)
+    # PROCESSAMENTO INDIVIDUAL E GLOBAL
+    news_impact_sum = 0.0
+    interpreted_news = []
+    
+    for h in headlines:
+        sentiment, css_class, impact = engine.analyze_single_news(h)
+        interpreted_news.append({"title": h, "ai_desc": sentiment, "class": css_class})
+        news_impact_sum += impact
 
-    # UI METRICS
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("XTI SPOT", f"${prices[-1]:.2f}", f"{prices[-1]-prices[-2]:.2f}")
-    m2.metric("STAT BIAS (Z)", f"{z_score:.2f}", "STABLE")
-    m3.metric("ARB VECTOR", f"{arb_bias:+.2f}", "DXY AUTO")
-    m4.metric("NEURAL SENTIMENT", f"{ai_sentiment:+.2f}", f"{len(headlines)} HEADLINES")
+    ai_sentiment = np.clip(news_impact_sum / 2, -1, 1)
+    z_score = engine.compute_z_score(prices)
+    arb_bias = np.clip(-dxy_delta * 10, -1, 1)
+    
+    final_score = (ai_sentiment * 0.45) + (arb_bias * 0.35) + (-np.clip(z_score/3, -1, 1) * 0.20)
 
-    st.markdown("---")
-    col_left, col_right = st.columns([2, 1])
+    # LAYOUT DE MÉTRICAS
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("WTI CRUDE", f"${prices[-1]:.2f}", f"{prices[-1]-prices[-2]:.2f}")
+    c2.metric("SENTIMENT", f"{ai_sentiment:+.2f}")
+    c3.metric("DXY ARB", f"{arb_bias:+.2f}")
+    c4.metric("MATH BIAS", f"{z_score:+.2f}")
 
-    with col_left:
-        st.markdown("#### LIVE LEXICON FEED (AUTOMATIC ANALYSIS)")
-        # Tabela visual passiva das notícias capturadas
-        for h in headlines[:12]:
-            st.markdown(f'<div class="news-card">{h}</div>', unsafe_allow_html=True)
-        
-        st.markdown("#### DETECTED MARKET VECTORS")
-        if events:
-            ev_cols = st.columns(4)
-            # Remove duplicatas para visualização limpa
-            unique_events = list(set(events))
-            for i, (ev, vec) in enumerate(unique_events[:8]):
-                color = "#00FF41" if vec == "BULLISH" else "#FF0000"
-                ev_cols[i%4].markdown(f"<span style='color:{color}'>● {ev}</span>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col_news, col_verdict = st.columns([1.8, 1])
 
-    with col_right:
+    with col_news:
+        st.markdown("#### IA LEXICON INTERPRETATION")
+        for item in interpreted_news[:10]:
+            st.markdown(f"""
+                <div class="news-card">
+                    <div class="news-title">{item['title']}</div>
+                    <div class="news-ai {item['class']}">AI DECODER >> {item['ai_desc']}</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+    with col_verdict:
         st.markdown("#### STRATEGIC VERDICT")
         conf = abs(final_score) * 100
         
         if final_score > engine.risk_threshold:
-            st.markdown(f"<div class='status-box' style='color:#00FF41; border-color:#00FF41;'>BUY / LONG<br>{conf:.1f}% CONFIDENCE</div>", unsafe_allow_html=True)
+            color, label = "#00FF41", "BUY / LONG"
         elif final_score < -engine.risk_threshold:
-            st.markdown(f"<div class='status-box' style='color:#FF0000; border-color:#FF0000;'>SELL / SHORT<br>{conf:.1f}% CONFIDENCE</div>", unsafe_allow_html=True)
+            color, label = "#FF3131", "SELL / SHORT"
         else:
-            st.markdown(f"<div class='status-box' style='color:#FFFF00; border-color:#FFFF00;'>STANDBY / NEUTRAL</div>", unsafe_allow_html=True)
+            color, label = "#FFFF00", "NEUTRAL"
+            
+        st.markdown(f"""
+            <div class="status-box" style="border-color: {color}; color: {color};">
+                {label}<br>
+                <span style="font-size: 0.8rem; opacity: 0.8;">CONFIDENCE: {conf:.1f}%</span>
+            </div>
+        """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        # Gráfico de suporte visual
-        fig = go.Figure(go.Scatter(y=prices, line=dict(color='#00FF41', width=2), fill='tozeroy'))
-        fig.update_layout(template="plotly_dark", height=250, margin=dict(l=0,r=0,t=0,b=0),
-                          xaxis_visible=False, yaxis_visible=True, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, width='stretch')
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Gráfico Estilo Terminal
+        fig = go.Figure(go.Scatter(y=prices, line=dict(color='#00FF41', width=2), fill='tozeroy', fillcolor='rgba(0,255,65,0.05)'))
+        fig.update_layout(
+            template="plotly_dark", height=300, margin=dict(l=0,r=0,t=0,b=0),
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(showgrid=False, visible=False),
+            yaxis=dict(showgrid=True, gridcolor='#1a1a1a', side="right")
+        )
+        st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
 if __name__ == "__main__":
     main()
