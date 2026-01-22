@@ -137,7 +137,7 @@ def main():
         with cl:
             fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}}))
             fig.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20,r=20,t=40,b=20))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with cr:
             st.markdown("**LIVE NEWS FEED**")
@@ -166,3 +166,4 @@ def main():
             st.markdown(audit_html + "</table>", unsafe_allow_html=True)
 
 if __name__ == "__main__": main()
+
