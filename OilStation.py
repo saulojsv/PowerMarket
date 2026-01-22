@@ -7,6 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
 import re
+import newspaper # Import direto para usar a função build
 from newspaper import Article
 from google import genai
 from streamlit_autorefresh import st_autorefresh
@@ -49,8 +50,9 @@ class XTINeuralEngine:
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
         self.oil_sources = [
-            "https://oilprice.com", "https://www.reuters.com/business/energy/",
-            "https://www.bloomberg.com/energy", "https://www.cnbc.com/oil/"
+            "https://oilprice.com", 
+            "https://www.reuters.com/business/energy/",
+            "https://www.cnbc.com/oil/"
         ]
         self.load_verified_data()
 
@@ -65,30 +67,48 @@ class XTINeuralEngine:
 
     def get_deep_analysis(self, title, full_text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
+        if not full_text or len(full_text) < 100: return 0.0, "NEUTRAL", "Texto Insuficiente"
         try:
-            # Deep Read: Analisamos o texto completo, não apenas o título
             contexto = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
             prompt = (f"DEEP READ ANALYSIS - WTI CRUDE OIL\n"
-                      f"Title: {title}\nContent: {full_text[:3000]}\n" # Limite de 3k caracteres para agilidade
+                      f"Title: {title}\nContent: {full_text[:3500]}\n"
                       f"Lexicons: {contexto}\n"
-                      f"Return: [SCORE: -1.0 to 1.0] [LABEL: BULLISH/BEARISH/NEUTRAL] [DEEP_READER: 1 sentence technical summary]")
+                      f"Return: [SCORE: -1.0 to 1.0] [LABEL: BULLISH/BEARISH/NEUTRAL] [DEEP_READER: 1 technical summary]")
             
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
             score = float(re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)[0])
             label = re.findall(r"LABEL:\s*(\w+)", response.text)[0].upper()
             summary = response.text.split("DEEP_READER:")[-1].strip()
             return score, label, summary
-        except: return 0.0, "NEUTRAL", "Erro na Extração Deep"
+        except: return 0.0, "NEUTRAL", "Erro na Análise Neural"
 
-@st.cache_data(ttl=300) # Aumentado para 5min pois a extração de texto completo é mais pesada
-def auto_scan(sources):
+@st.cache_data(ttl=300)
+def auto_scan_real_news(sources):
+    """Mapeia artigos específicos dentro dos sites para evitar ler a home-page."""
     collected = []
-    for url in sources:
+    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec']
+    
+    for site_url in sources:
         try:
-            a = Article(url); a.download(); a.parse()
-            if len(a.title) > 10:
-                # Pegamos o título E o texto completo do artigo
-                collected.append({"title": a.title, "text": a.text, "url": url})
+            # Build mapeia links do site
+            paper = newspaper.build(site_url, memoize_articles=False, language='en')
+            count = 0
+            for article in paper.articles:
+                if count >= 3: break # Pega as 3 mais recentes por site
+                
+                # Filtra se o link parece ser de petróleo
+                if any(kw in article.url.lower() for kw in keywords):
+                    try:
+                        article.download()
+                        article.parse()
+                        if len(article.text) > 200:
+                            collected.append({
+                                "title": article.title,
+                                "text": article.text,
+                                "url": article.url
+                            })
+                            count += 1
+                    except: continue
         except: continue
     return collected
 
@@ -102,13 +122,13 @@ def get_market_data():
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.7 // DEEP READ ACTIVE >")
+    st.markdown("XTI/USD NEURAL TERMINAL")
     
-    headlines_data = auto_scan(engine.oil_sources)
+    # Agora o scan busca artigos individuais
+    headlines_data = auto_scan_real_news(engine.oil_sources)
     analysis_results = []
     
     for item in headlines_data:
-        # Passando título e texto para a IA
         score, label, summary = engine.get_deep_analysis(item['title'], item['text'])
         analysis_results.append({"h": item['title'], "url": item['url'], "s": score, "l": label, "sum": summary})
 
@@ -117,7 +137,9 @@ def main():
     with tab_home:
         col_feed, col_market = st.columns([1.8, 1])
         with col_feed:
-            st.write(f"🛰️ **DEEP READ FEED ({len(headlines_data)} Artigos Analisados)**")
+            st.write(f"🛰️ **LIVE ARTICLE FEED ({len(headlines_data)} Notícias Reais)**")
+            if not headlines_data:
+                st.warning("Aguardando novas publicações de petróleo...")
             for item in analysis_results:
                 st.markdown(f'''
                     <div class="news-card-mini {item['l']}">
@@ -139,13 +161,13 @@ def main():
             if not xti_data.empty:
                 fig = go.Figure(go.Scatter(y=xti_data['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
     with tab_neural:
         for res in analysis_results:
             with st.expander(f"DEEP READ: {res['h']}"):
-                st.write(f"**Análise Técnica:** {res['sum']}")
-                st.write(f"**Score:** {res['s']}")
+                st.write(f"**Análise da IA:** {res['sum']}")
+                st.write(f"**Score de Sentimento:** {res['s']}")
 
 if __name__ == "__main__":
     main()
