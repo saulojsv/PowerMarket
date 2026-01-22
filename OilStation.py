@@ -15,12 +15,12 @@ client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 
 # --- 1. CONFIGURAÇÃO ESTÉTICA ---
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
-# Atualização automática a cada 60 segundos
 st_autorefresh(interval=60000, key="v90_refresh") 
 
 MEMORY_FILE = "brain_memory.json"
 VERIFIED_FILE = "verified_lexicons.json"
 BACKUP_FILE = "verified_lexicons_backup.json"
+AUDIT_CSV = "Oil_Station_Audit.csv"
 
 OIL_MANDATORY_TERMS = [
     "oil", "wti", "crude", "brent", "gasoline", "fuel", "opec", 
@@ -46,6 +46,9 @@ st.markdown("""
     header {visibility: hidden;}
     [data-testid="stMetricValue"] { font-size: 24px !important; color: #00FFC8 !important; }
     .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #111827; border-bottom: 2px solid #00FFC8; margin-bottom: 20px; font-family: monospace; }
+    .driver-card { background: #111827; border: 1px solid #1E293B; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 10px; }
+    .driver-val { font-size: 22px; font-weight: bold; color: #00FFC8; font-family: monospace; }
+    .driver-label { font-size: 10px; color: #94A3B8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
     .scroll-container { height: 400px; overflow-y: auto; border: 1px solid #1E293B; background: #020617; font-family: monospace; }
     .match-tag { background: #064E3B; color: #34D399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
     .veto-tag { background: #450a0a; color: #f87171; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
@@ -91,11 +94,9 @@ def save_json(p, d):
 
 def get_ai_val(title):
     try:
-        # Prompt otimizado para extrair fatos e remover ruído
         prompt = (
             f"Analise impacto no WTI: '{title}'. "
-            "1. Remova ruídos (nomes de autores, 'clique aqui'). "
-            "2. Extraia EXPRESSÕES técnicas (ex: 'Refinery shutdown', 'OPEC quota breach'). "
+            "1. Remova ruídos. 2. Extraia EXPRESSÕES técnicas. "
             "3. Viés: 1 (Alta), -1 (Baixa), 0 (Neutro). "
             "Responda APENAS JSON: {\"alpha\": 1/-1/0, \"termos\": [\"Expressão 1\"]}"
         )
@@ -130,7 +131,6 @@ def fetch_news():
                 ai_data = get_ai_val(entry.title)
                 ai_dir = ai_data.get("alpha", 0)
                 
-                # Coleta de novas expressões para a aba Training
                 for t in ai_data.get("termos", []):
                     t = t.lower().strip()
                     if len(t) > 3 and t not in verified and t not in memory:
@@ -146,7 +146,7 @@ def fetch_news():
         except: continue
     
     save_json(MEMORY_FILE, memory)
-    if news_list: pd.DataFrame(news_list).to_csv("Oil_Station_Audit.csv", index=False)
+    if news_list: pd.DataFrame(news_list).to_csv(AUDIT_CSV, index=False)
 
 @st.cache_data(ttl=300)
 def get_market_metrics():
@@ -161,35 +161,50 @@ def get_market_metrics():
 
 # --- 3. INTERFACE ---
 def main():
-    # Roda a inteligência periodicamente
     fetch_news()
-    
     mkt = get_market_metrics()
-    df_audit = pd.read_csv("Oil_Station_Audit.csv") if os.path.exists("Oil_Station_Audit.csv") else pd.DataFrame()
+    df_audit = pd.read_csv(AUDIT_CSV) if os.path.exists(AUDIT_CSV) else pd.DataFrame()
     memory = load_json(MEMORY_FILE)
     verified = load_json(VERIFIED_FILE)
     
-    avg_alpha = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
-    ica_val = (avg_alpha + (mkt['Z'] * -5)) / 2
+    # COMPONENTES DO ICA
+    sentiment_driver = df_audit['Alpha'].mean() if not df_audit.empty else 0.0
+    technical_driver = mkt['Z'] * -5.0 # Peso do desvio de preço
+    ica_val = (sentiment_driver + technical_driver) / 2
 
     st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V90 EVO</div><div>{mkt["status"]} ● {datetime.now().strftime("%H:%M")}</div></div>', unsafe_allow_html=True)
     
+    # --- NOVA SEÇÃO: ICA DRIVERS (TRANSPARÊNCIA) ---
+    c_dr1, c_dr2, c_dr3, c_dr4 = st.columns(4)
+    with c_dr1:
+        st.markdown(f'<div class="driver-card"><div class="driver-label">SENTIMENT ALPHA (NEWS)</div><div class="driver-val">{sentiment_driver:.2f}</div></div>', unsafe_allow_html=True)
+    with c_dr2:
+        st.markdown(f'<div class="driver-card"><div class="driver-label">TECHNICAL DRIVE (PRICE)</div><div class="driver-val">{technical_driver:.2f}</div></div>', unsafe_allow_html=True)
+    with c_dr3:
+        conf_status = "ALTA" if (sentiment_driver * technical_driver) > 0 else "CONFLITO"
+        st.markdown(f'<div class="driver-card"><div class="driver-label">CONFLUÊNCIA GERAL</div><div class="driver-val">{conf_status}</div></div>', unsafe_allow_html=True)
+    with c_dr4:
+        st.markdown(f'<div class="driver-card"><div class="driver-label">Z-SCORE IMPACT</div><div class="driver-val">{mkt["Z"]:.2f}</div></div>', unsafe_allow_html=True)
+
+    st.divider()
+
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 SENTIMENT AUDIT", "🧠 TRAINING"])
 
     with t1:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("WTI", f"$ {mkt['WTI']:.2f}")
-        c2.metric("USDCAD", f"{mkt['CAD']:.4f}")
-        c3.metric("Z-SCORE", f"{mkt['Z']:.2f}")
-        c4.metric("ICA SCORE", f"{ica_val:.2f}")
+        col_metrics, col_table = st.columns([1, 2])
+        with col_metrics:
+            st.metric("WTI PRICE", f"$ {mkt['WTI']:.2f}")
+            st.metric("USDCAD", f"{mkt['CAD']:.4f}")
+            
+            fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={
+                'axis': {'range': [-15, 15]}, 
+                'bar': {'color': "#00FFC8"},
+                'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}
+            ))
+            fig.update_layout(height=280, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20, r=20, t=30, b=20))
+            st.plotly_chart(fig, use_container_width=True)
 
-        cg, cn = st.columns([1, 2])
-        with cg:
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=ica_val, gauge={'axis': {'range': [-15, 15]}, 'bar': {'color': "#00FFC8"}, 'steps': [{'range': [-15, -5], 'color': '#450a0a'}, {'range': [5, 15], 'color': '#064E3B'}]}))
-            fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"}, margin=dict(l=20, r=20, t=50, b=20))
-            st.plotly_chart(fig, width='stretch')
-
-        with cn:
+        with col_table:
             if not df_audit.empty:
                 html = "<table><tr><th>HORA</th><th>MANCHETE</th><th>STATUS</th></tr>"
                 for _, row in df_audit.iterrows():
@@ -198,7 +213,7 @@ def main():
                 st.markdown(f'<div class="scroll-container">{html}</table></div>', unsafe_allow_html=True)
 
     with t2:
-        st.subheader("🕵️ Auditoria de Viés (IA vs Lexicons)")
+        st.subheader("🕵️ Auditoria de Viés (Sinalização)")
         if not df_audit.empty:
             col_lex, col_ai = st.columns(2)
             with col_lex:
@@ -209,7 +224,6 @@ def main():
                     cls = "bias-up" if bias == "ALTISTA" else "bias-down" if bias == "BAIXA" else ""
                     lex_html += f"<tr><td>{row['Manchete'][:60]}...</td><td class='{cls}'>{bias}</td></tr>"
                 st.markdown(lex_html + "</table>", unsafe_allow_html=True)
-
             with col_ai:
                 st.markdown("### 🤖 Interpretação AI (Gemini)")
                 ai_html = "<table><tr><th>Manchete</th><th>Viés</th></tr>"
@@ -221,13 +235,12 @@ def main():
 
     with t3:
         st.subheader("🧠 Treinamento Contínuo")
-        st.info("Novas expressões são capturadas automaticamente a cada minuto.")
+        st.info("Novas expressões capturadas automaticamente a cada minuto via RSS.")
         cl, cr = st.columns(2)
         with cl:
             st.markdown("✅ **Dicionário Validado**")
             for term, val in sorted(verified.items()):
                 st.markdown(f'<div class="learned-box">{term.upper()} (Viés: {"Alta" if val>0 else "Baixa" if val<0 else "Neutro"})</div>', unsafe_allow_html=True)
-                
         with cr:
             st.markdown("💡 **Sugestões da IA (Novos Fatos)**")
             for term, data in list(memory.items())[:15]:
