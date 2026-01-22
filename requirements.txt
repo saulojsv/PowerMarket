@@ -1,11 +1,6 @@
-pandas
-feedparser
-streamlit==1.32.0
-altair==4.2.2
-plotly
-yfinance
-google-genai
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-streamlit-autorefresh
+streamlit>=1.30.0
+pandas>=2.1.0
+numpy>=1.26.0
+plotly>=5.18.0
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0
