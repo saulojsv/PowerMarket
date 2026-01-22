@@ -31,11 +31,9 @@ st.markdown("""
     .stApp { background: #050A12; color: #FFFFFF; }
     header {visibility: hidden;}
     
-    /* Status Bar */
     .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #0F172A; border-bottom: 1px solid #00FFC8; margin-bottom: 20px; font-family: monospace; font-size: 12px; }
     .status-live { color: #00FFC8; font-weight: bold; }
     
-    /* Botões Customizados */
     .stButton>button {
         background-color: transparent;
         color: #00FFC8;
@@ -53,7 +51,6 @@ st.markdown("""
         box-shadow: 0 0 15px #00FFC8;
     }
 
-    /* Cards e Tabelas */
     .driver-card { background: #111827; border-left: 3px solid #1E293B; padding: 12px; border-radius: 4px; }
     .driver-val { font-size: 20px; font-weight: bold; color: #F8FAFC; font-family: monospace; }
     .driver-label { font-size: 10px; color: #94A3B8; text-transform: uppercase; }
@@ -61,7 +58,6 @@ st.markdown("""
     .terminal-table th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; text-transform: uppercase; border-bottom: 1px solid #334155; }
     .terminal-table td { padding: 10px 8px; border-bottom: 1px solid #0F172A; }
     
-    /* Tags de Viés */
     .bias-tag { padding: 3px 6px; border-radius: 2px; font-weight: bold; font-size: 10px; }
     .up { background: #064E3B; color: #34D399; }
     .down { background: #450A0A; color: #F87171; }
@@ -87,7 +83,7 @@ def upload_to_drive():
     except:
         return False
 
-# --- 3. LÓGICA DE DADOS ACUMULATIVOS ---
+# --- 3. LÓGICA DE DADOS (COM ATUALIZAÇÃO DINÂMICA) ---
 OIL_MANDATORY_TERMS = ["oil", "wti", "crude", "brent", "opec", "inventory", "tengiz", "production"]
 NEWS_SOURCES = {
     "OilPrice": "https://oilprice.com/rss/main",
@@ -98,31 +94,35 @@ NEWS_SOURCES = {
 
 def fetch_news():
     news_list = []
+    # Carregamento forçado sem cache para aceitar novos lexicons instantaneamente
     verified = {}
     if os.path.exists(VERIFIED_FILE):
         try:
-            with open(VERIFIED_FILE, 'r') as f: verified = json.load(f)
+            with open(VERIFIED_FILE, 'r', encoding='utf-8') as f:
+                verified = json.load(f)
         except: pass
     
     for source, url in NEWS_SOURCES.items():
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:8]:
+            for entry in feed.entries[:10]:
                 title = entry.title
                 title_low = title.lower()
                 if not any(t in title_low for t in OIL_MANDATORY_TERMS): continue
                 
-                dt_parsed = entry.get('published_parsed', datetime.now().timetuple())
-                dt_str = datetime(*dt_parsed[:6]).strftime("%d/%m %H:%M")
-
+                # Identificação de Lexicons
                 lex_dir = 0
                 for expr, val in verified.items():
                     if expr.lower() in title_low:
                         lex_dir = val
                         break
                 
+                # IA de suporte
                 ai_dir = 1 if any(x in title_low for x in ["cut", "rise", "tight"]) else -1 if any(x in title_low for x in ["build", "fall", "glut"]) else 0
                 
+                dt_parsed = entry.get('published_parsed', datetime.now().timetuple())
+                dt_str = datetime(*dt_parsed[:6]).strftime("%d/%m %H:%M")
+
                 news_list.append({
                     "Data": dt_str,
                     "Fonte": source,
@@ -138,7 +138,8 @@ def fetch_news():
         new_df = pd.DataFrame(news_list)
         if os.path.exists(AUDIT_CSV):
             old_df = pd.read_csv(AUDIT_CSV)
-            combined = pd.concat([old_df, new_df]).drop_duplicates(subset=['Manchete'], keep='first')
+            # keep='last' permite que a notícia seja atualizada se o lexicon mudou
+            combined = pd.concat([old_df, new_df]).drop_duplicates(subset=['Manchete'], keep='last')
             combined.to_csv(AUDIT_CSV, index=False)
         else:
             new_df.to_csv(AUDIT_CSV, index=False)
