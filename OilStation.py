@@ -18,7 +18,7 @@ from streamlit_autorefresh import st_autorefresh
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-st.set_page_config(page_title="XTI NEURAL | TERMINAL v12.0", layout="wide")
+st.set_page_config(page_title="XTI NEURAL | TERMINAL v12.1", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS PERSONALIZADO ---
@@ -56,7 +56,9 @@ class XTINeuralEngine:
             "https://www.reuters.com/business/energy/",
             "https://www.cnbc.com/oil/",
             "https://www.bloomberg.com/energy",
-            "https://www.investing.com/commodities/crude-oil-news"
+            "https://www.investing.com/commodities/crude-oil-news",
+            "https://www.barrons.com/topics/oil",
+            "https://www.wsj.com/market-data/commodities"
         ]
         self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
 
@@ -80,22 +82,30 @@ class XTINeuralEngine:
             return score, label, summary
         except: return 0.0, "NEUTRAL", "Parsing Neural em modo de segurança."
 
-@st.cache_data(ttl=60)
-def auto_scan_real_news(sources):
+def get_all_news(sources):
     collected = []
-    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec']
+    keywords = ['oil', 'crude', 'wti', 'brent', 'energy', 'inventory', 'opec', 'fuel']
     config = Config()
     config.request_timeout = 10
-    for site_url in sources:
-        try:
-            paper = newspaper.build(site_url, config=config, memoize_articles=False)
-            for article in paper.articles[:5]:
-                if any(kw in article.url.lower() for kw in keywords):
-                    article.download(); article.parse()
-                    if len(article.title) > 10:
-                        collected.append({"title": article.title, "url": article.url})
-                    if len(collected) >= 8: return collected
-        except: continue
+    
+    with st.status("🔍 Iniciando varredura neural em múltiplas fontes...", expanded=True) as status:
+        for site_url in sources:
+            st.write(f"📡 Varrendo: {site_url}...")
+            try:
+                paper = newspaper.build(site_url, config=config, memoize_articles=False)
+                site_count = 0
+                for article in paper.articles[:8]: # Analisa os 8 mais recentes de cada site
+                    if any(kw in article.url.lower() for kw in keywords):
+                        article.download()
+                        article.parse()
+                        if len(article.title) > 10:
+                            collected.append({"title": article.title, "url": article.url})
+                            site_count += 1
+                st.write(f"✅ {site_url}: {site_count} notícias encontradas.")
+            except:
+                st.write(f"❌ {site_url}: Erro na conexão ou bloqueio.")
+                continue
+        status.update(label="✅ Varredura Completa", state="complete", expanded=False)
     return collected
 
 @st.cache_data(ttl=30)
@@ -114,27 +124,26 @@ def get_market_data():
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v12.0 // STABLE BUILD >")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v12.1 // DEEP SCAN >")
     
-    headlines_data = auto_scan_real_news(engine.oil_sources)
+    # Varredura explícita
+    headlines_data = get_all_news(engine.oil_sources)
     
     analysis_results = []
-    for item in headlines_data:
-        s, l, sum_ = engine.get_deep_analysis(item['title'], item['url'])
-        analysis_results.append({
-            "title": item['title'], 
-            "url": item['url'], 
-            "s": s, 
-            "l": l, 
-            "sum": sum_
-        })
+    if headlines_data:
+        progress_bar = st.progress(0)
+        for i, item in enumerate(headlines_data):
+            s, l, sum_ = engine.get_deep_analysis(item['title'], item['url'])
+            analysis_results.append({"title": item['title'], "url": item['url'], "s": s, "l": l, "sum": sum_})
+            progress_bar.progress((i + 1) / len(headlines_data))
+        progress_bar.empty()
 
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
     with tab_home:
         col_feed, col_market = st.columns([1.7, 1])
         with col_feed:
-            st.write(f"🛰️ **FEED ATIVO ({len(analysis_results)} Notícias)**")
+            st.write(f"🛰️ **FEED ATIVO ({len(analysis_results)} Notícias Consolidadas)**")
             for item in analysis_results:
                 title_text = item.get('title', 'Unknown News')
                 display_h = re.sub(r'[^\w\s\-\(\)\.\,\']', '', title_text)[:85]
@@ -166,8 +175,6 @@ def main():
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0),
                                   xaxis=dict(visible=False), yaxis=dict(side="right", gridcolor="#111", autorange=True),
                                   paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                
-                # AJUSTE: use_container_width substituído por width='stretch'
                 st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
     with tab_neural:
