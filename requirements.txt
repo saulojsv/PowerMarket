@@ -3,7 +3,8 @@ pandas
 numpy
 plotly
 yfinance
-google-generativeai
+google-genai
 lxml_html_clean
 newspaper3k
 streamlit-autorefresh
+
