@@ -13,10 +13,10 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE & REGRAS 2026 ---
 warnings.filterwarnings("ignore", category=SyntaxWarning)
-st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.6", layout="wide")
+st.set_page_config(page_title="XTI NEURAL", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
-# --- CSS PERSONALIZADO (SEM SIDEBAR - FOCO TOTAL) ---
+# --- CSS PERSONALIZADO ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -24,7 +24,6 @@ st.markdown("""
     [data-testid="stAppViewContainer"] { background-color: #000000; padding: 1rem 3rem; }
     [data-testid="stSidebar"] { display: none; } 
     
-    /* Layout Home: Notícias Resumidas */
     .news-card-mini { 
         background-color: #0a0a0a; border: 1px solid #1a1a1a; 
         padding: 12px; margin-bottom: 8px; border-radius: 4px;
@@ -45,12 +44,15 @@ st.markdown("""
         padding: 2px 10px; margin: 3px; border-radius: 5px; font-size: 0.8rem;
         border: 1px solid #00FF41; font-family: 'JetBrains Mono';
     }
+    .learning-box {
+        background-color: #050505; border: 1px dashed #00FF41;
+        padding: 15px; border-radius: 5px; margin-top: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 class XTINeuralEngine:
     def __init__(self):
-        # Acesso via Secrets
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
@@ -70,18 +72,24 @@ class XTINeuralEngine:
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
         try:
             contexto = list(self.bullish_keywords.keys()) + list(self.bearish_keywords.keys())
-            prompt = f"Analise WTI: '{text}'. Léxicos: {contexto}. Retorne: [SCORE: -1.0 a 1.0] [LABEL: Bullish, Bearish ou Neutral] [DEEP_READER: 1 frase técnica]"
+            # Prompt ajustado para focar em termos técnicos novos
+            prompt = (f"Analise WTI: '{text}'. Léxicos conhecidos: {contexto}. "
+                      "Retorne rigorosamente: [SCORE: -1.0 a 1.0] [LABEL: Bullish, Bearish ou Neutral] "
+                      "[DEEP_READER: 1 frase técnica] [NEW_TERM: 1 termo técnico chave desta notícia]")
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
+            
             score = float(re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)[0])
             label = re.findall(r"LABEL:\s*(\w+)", response.text)[0].upper()
-            summary = response.text.split("DEEP_READER:")[-1].strip()
-            return score, label, summary
-        except: return 0.0, "NEUTRAL", "Erro Neural"
+            summary = response.text.split("DEEP_READER:")[-1].split("[NEW_TERM:")[0].strip()
+            new_term = response.text.split("NEW_TERM:")[-1].replace("]", "").strip().upper()
+            
+            return score, label, summary, new_term
+        except: return 0.0, "NEUTRAL", "Erro Neural", "NONE"
 
 @st.cache_data(ttl=300)
 def auto_scan(sources):
     collected = []
-    for url in sources[:10]: # Limite de 10 sites
+    for url in sources[:10]:
         try:
             a = Article(url); a.download(); a.parse()
             if len(a.title) > 10: collected.append(a.title)
@@ -90,50 +98,45 @@ def auto_scan(sources):
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.6 // DEEP LEARNING >")
+    st.markdown("XTI/USD NEURAL TERMINAL")
     
-    # Execução do Core Neural
     headlines = auto_scan(engine.oil_sources)
     analysis_results = []
-    for h in headlines:
-        score, label, summary = engine.get_deep_analysis(h)
-        analysis_results.append({"h": h, "s": score, "l": label, "sum": summary})
+    sugestoes_aprendizado = {"bullish": [], "bearish": []}
 
-    # --- NAVEGAÇÃO POR ABAS ---
+    for h in headlines:
+        score, label, summary, new_term = engine.get_deep_analysis(h)
+        analysis_results.append({"h": h, "s": score, "l": label, "sum": summary})
+        
+        # Lógica de alimentação do aprendizado
+        if new_term != "NONE" and len(new_term) > 2:
+            if label == "BULLISH" and new_term not in engine.bullish_keywords:
+                sugestoes_aprendizado["bullish"].append(new_term)
+            elif label == "BEARISH" and new_term not in engine.bearish_keywords:
+                sugestoes_aprendizado["bearish"].append(new_term)
+
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
     with tab_home:
         col_feed, col_market = st.columns([1.8, 1])
-        
         with col_feed:
             st.write("🛰️ **LIVE RESUME FEED**")
-            # Agora as notícias aparecem resumidas na dashboard como solicitado
             for item in analysis_results:
-                st.markdown(f"""
-                    <div class="news-card-mini {item['l']}">
-                        <span style="color:white; font-weight:500;">{item['h'][:110]}...</span>
-                        <span class="label-tag {item['l']}">{item['l']}</span>
-                    </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f'<div class="news-card-mini {item["l"]}"><span style="color:white; font-weight:500;">{item["h"][:110]}...</span><span class="label-tag {item["l"]}">{item["l"]}</span></div>', unsafe_allow_html=True)
 
         with col_market:
             try:
                 xti = yf.download("CL=F", period="1d", interval="1m", progress=False)
                 price = xti['Close'].iloc[-1].values[0]
             except: price = 0.0
-            
             avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
             veredito = "BUY" if avg_score > 0.15 else "SELL" if avg_score < -0.15 else "HOLD"
             v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
-            
-            # Veredito e confiança
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
             st.metric("WTI SPOT", f"${price:.2f}")
-            
             if not xti.empty:
                 fig = go.Figure(go.Scatter(y=xti['Close'].values.flatten(), line=dict(color='#00FF41', width=3)))
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0), xaxis=dict(visible=False), yaxis=dict(side="right"))
-                # Padrão 2026: width='stretch'
                 st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
     with tab_neural:
@@ -141,18 +144,34 @@ def main():
         c1, c2 = st.columns([1, 2])
         
         with c1:
-            st.markdown("**LEXICONS DETECTADOS NO JSON:**")
+            st.markdown("**LEXICONS ATUAIS:**")
             st.write("Bullish:")
             st.markdown(" ".join([f'<span class="lexicon-chip">{k}</span>' for k in engine.bullish_keywords.keys()]), unsafe_allow_html=True)
             st.write("Bearish:")
             st.markdown(" ".join([f'<span class="lexicon-chip" style="border-color:#FF3131; color:#FF3131;">{k}</span>' for k in engine.bearish_keywords.keys()]), unsafe_allow_html=True)
+            
+            # SEÇÃO DE APRENDIZADO
+            st.markdown('<div class="learning-box">', unsafe_allow_html=True)
+            st.markdown("#### 💡 NOVOS LÉXICOS DETECTADOS")
+            st.write("Adicione ao seu `verified_lexicons.json`:")
+            
+            final_bullish = list(set(sugestoes_aprendizado["bullish"]))
+            final_bearish = list(set(sugestoes_aprendizado["bearish"]))
+            
+            if final_bullish or final_bearish:
+                new_json = {"bullish": {term: 0.5 for term in final_bullish}, "bearish": {term: 0.5 for term in final_bearish}}
+                st.json(new_json)
+                st.button("Sincronizar Novos Léxicos (Sessão Atual)")
+            else:
+                st.write("Monitorando padrões inéditos...")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with c2:
-            st.markdown("**DECISÕES DETALHADAS DA IA (DEEP READER):**")
+            st.markdown("**DECISÕES DETALHADAS DA IA:**")
             for res in analysis_results:
                 with st.expander(f"DECISÃO: {res['l']} | SCORE: {res['s']:+.2f}"):
                     st.write(f"**Manchete:** {res['h']}")
-                    st.success(f"**Deep Reader Conclusion:** {res['sum']}")
+                    st.success(f"**Conclusão IA:** {res['sum']}")
 
 if __name__ == "__main__":
     main()
