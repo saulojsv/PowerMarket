@@ -18,7 +18,7 @@ from streamlit_autorefresh import st_autorefresh
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.9", layout="wide")
+st.set_page_config(page_title="XTI NEURAL | TERMINAL v11.9.1", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS PERSONALIZADO ---
@@ -51,14 +51,12 @@ class XTINeuralEngine:
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
-        # Fontes expandidas para maior margem de notícias
         self.oil_sources = [
             "https://oilprice.com", 
             "https://www.reuters.com/business/energy/",
             "https://www.cnbc.com/oil/",
             "https://www.bloomberg.com/energy",
-            "https://www.investing.com/commodities/crude-oil-news",
-            "https://www.barrons.com/topics/oil"
+            "https://www.investing.com/commodities/crude-oil-news"
         ]
         self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
 
@@ -103,7 +101,6 @@ def auto_scan_real_news(sources):
 @st.cache_data(ttl=30)
 def get_market_data():
     try:
-        # Período de 5 dias para garantir a visualização da linha de tendência
         df = yf.download("CL=F", period="5d", interval="15m", progress=False)
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
@@ -117,10 +114,21 @@ def get_market_data():
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v11.9 // MARKET ANALYSIS >")
+    st.markdown("### < XTI/USD NEURAL TERMINAL v11.9.1 // BUG FIX >")
     
     headlines_data = auto_scan_real_news(engine.oil_sources)
-    analysis_results = [dict(item, **dict(zip(['s','l','sum'], engine.get_deep_analysis(item['title'], item['url'])))) for item in headlines_data]
+    
+    # CORREÇÃO DA CHAVE: Unificando 'title' como fonte da notícia
+    analysis_results = []
+    for item in headlines_data:
+        s, l, sum_ = engine.get_deep_analysis(item['title'], item['url'])
+        analysis_results.append({
+            "title": item['title'], 
+            "url": item['url'], 
+            "s": s, 
+            "l": l, 
+            "sum": sum_
+        })
 
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
@@ -129,14 +137,18 @@ def main():
         with col_feed:
             st.write(f"🛰️ **FEED ATIVO ({len(analysis_results)} Notícias)**")
             for item in analysis_results:
-                display_h = re.sub(r'[^\w\s\-\(\)\.\,\']', '', item['h'])[:85]
+                # Sanitização robusta para evitar erros de renderização
+                title_text = item.get('title', 'Unknown News')
+                display_h = re.sub(r'[^\w\s\-\(\)\.\,\']', '', title_text)[:85]
+                label = item.get('l', 'NEUTRAL')
+                
                 st.markdown(f'''
-                    <div class="news-card-mini {item['l']}">
+                    <div class="news-card-mini {label}">
                         <div style="display: flex; align-items: center; overflow: hidden;">
-                            <a href="{item['url']}" target="_blank" style="color:#00FF41; text-decoration:none; margin-right:12px;">🔗</a>
+                            <a href="{item.get('url', '#')}" target="_blank" style="color:#00FF41; text-decoration:none; margin-right:12px;">🔗</a>
                             <span class="news-text">{display_h}...</span>
                         </div>
-                        <span class="label-tag {item['l']}">{item['l']}</span>
+                        <span class="label-tag {label}">{label}</span>
                     </div>
                 ''', unsafe_allow_html=True)
 
@@ -156,13 +168,14 @@ def main():
                 fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0),
                                   xaxis=dict(visible=False), yaxis=dict(side="right", gridcolor="#111", autorange=True),
                                   paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with tab_neural:
         for res in analysis_results:
-            with st.expander(f"ANALYSIS: {res['h'][:80]}..."):
-                st.info(f"**IA:** {res['sum']}")
-                st.write(f"Score: `{res['s']}` | Status: `{res['l']}`")
+            title_brief = res.get('title', 'Analysis')[:80]
+            with st.expander(f"ANALYSIS: {title_brief}..."):
+                st.info(f"**IA:** {res.get('sum', 'Sem sumário disponível.')}")
+                st.write(f"Score: `{res.get('s', 0.0)}` | Status: `{res.get('l', 'NEUTRAL')}`")
 
 if __name__ == "__main__":
     main()
