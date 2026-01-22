@@ -1,5 +1,4 @@
 import pandas as pd
-import re
 import feedparser
 import os
 import json
@@ -18,7 +17,7 @@ client = genai.Client(api_key="AIzaSyCtQK_hLAM-mcihwnM0ER-hQzSt2bUMKWM")
 SERVICE_ACCOUNT_FILE = 'oilstation-485112-ac2d104d1370.json' 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
-# --- 1. CONFIGURAÇÃO ESTÉTICA ---
+# --- 1. CONFIGURAÇÃO ESTÉTICA E CSS DOS BOTÕES ---
 st.set_page_config(page_title="TERMINAL XTIUSD", layout="wide", initial_sidebar_state="collapsed")
 st_autorefresh(interval=60000, key="v92_refresh") 
 
@@ -27,41 +26,55 @@ VERIFIED_FILE = "verified_lexicons.json"
 AUDIT_CSV = "Oil_Station_Audit.csv"
 REPORT_MARKER = "last_report_date.txt"
 
-# Fontes Expandidas
-NEWS_SOURCES = {
-    "OilPrice": "https://oilprice.com/rss/main",
-    "Investing": "https://www.investing.com/rss/news_11.rss",
-    "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy",
-    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15838907"
-}
-
 st.markdown("""
     <style>
     .stApp { background: #050A12; color: #FFFFFF; }
     header {visibility: hidden;}
+    
+    /* Status Bar */
     .live-status { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #0F172A; border-bottom: 1px solid #00FFC8; margin-bottom: 20px; font-family: monospace; font-size: 12px; }
     .status-live { color: #00FFC8; font-weight: bold; }
-    .status-off { color: #EF4444; font-weight: bold; }
+    
+    /* Botões Customizados */
+    .stButton>button {
+        background-color: transparent;
+        color: #00FFC8;
+        border: 1px solid #00FFC8;
+        border-radius: 4px;
+        font-family: monospace;
+        font-weight: bold;
+        transition: all 0.3s ease;
+        width: 100%;
+        margin-top: 10px;
+    }
+    .stButton>button:hover {
+        background-color: #00FFC8;
+        color: #050A12;
+        box-shadow: 0 0 15px #00FFC8;
+    }
+
+    /* Cards e Tabelas */
     .driver-card { background: #111827; border-left: 3px solid #1E293B; padding: 12px; border-radius: 4px; }
     .driver-val { font-size: 20px; font-weight: bold; color: #F8FAFC; font-family: monospace; }
     .driver-label { font-size: 10px; color: #94A3B8; text-transform: uppercase; }
     .terminal-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px; margin-top: 10px; }
     .terminal-table th { background: #1E293B; color: #00FFC8; text-align: left; padding: 8px; text-transform: uppercase; border-bottom: 1px solid #334155; }
     .terminal-table td { padding: 10px 8px; border-bottom: 1px solid #0F172A; }
+    
+    /* Tags de Viés */
     .bias-tag { padding: 3px 6px; border-radius: 2px; font-weight: bold; font-size: 10px; }
     .up { background: #064E3B; color: #34D399; }
     .down { background: #450A0A; color: #F87171; }
     .mid { background: #1E293B; color: #94A3B8; }
+    
     .scroll-box { height: 400px; overflow-y: auto; background: #020617; border: 1px solid #1E293B; padding: 5px; }
     .link-btn { color: #00FFC8 !important; text-decoration: none; border: 1px solid #00FFC8; padding: 2px 5px; border-radius: 3px; font-size: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LOGICA DE DRIVE ---
+# --- 2. LÓGICA DE DRIVE ---
 def upload_to_drive():
-    if not os.path.exists(SERVICE_ACCOUNT_FILE):
-        return False
-    if not os.path.exists(AUDIT_CSV):
+    if not os.path.exists(SERVICE_ACCOUNT_FILE) or not os.path.exists(AUDIT_CSV):
         return False
     try:
         creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
@@ -74,20 +87,17 @@ def upload_to_drive():
     except:
         return False
 
-# --- 3. LOGICA DE DADOS ---
+# --- 3. LÓGICA DE DADOS ACUMULATIVOS ---
 OIL_MANDATORY_TERMS = ["oil", "wti", "crude", "brent", "opec", "inventory", "tengiz", "production"]
-
-def get_market_metrics():
-    try:
-        wti = yf.Ticker("CL=F").history(period="2d")
-        wti_p, wti_prev = wti['Close'].iloc[-1], wti['Close'].iloc[-2]
-        change_pct = ((wti_p - wti_prev) / wti_prev) * 100
-        return {"WTI": wti_p, "Z": round(change_pct / 1.2, 2), "status": "LIVE_YF", "is_live": True}
-    except: return {"WTI": 0.0, "Z": 0.0, "status": "MKT_OFFLINE", "is_live": False}
+NEWS_SOURCES = {
+    "OilPrice": "https://oilprice.com/rss/main",
+    "Investing": "https://www.investing.com/rss/news_11.rss",
+    "Reuters": "https://www.reutersagency.com/feed/?best-topics=energy",
+    "CNBC": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15838907"
+}
 
 def fetch_news():
     news_list = []
-    # Tentativa de carregar lexicons verificados
     verified = {}
     if os.path.exists(VERIFIED_FILE):
         try:
@@ -105,7 +115,6 @@ def fetch_news():
                 dt_parsed = entry.get('published_parsed', datetime.now().timetuple())
                 dt_str = datetime(*dt_parsed[:6]).strftime("%d/%m %H:%M")
 
-                # Lógica de Viés Integrada
                 lex_dir = 0
                 for expr, val in verified.items():
                     if expr.lower() in title_low:
@@ -129,27 +138,29 @@ def fetch_news():
         new_df = pd.DataFrame(news_list)
         if os.path.exists(AUDIT_CSV):
             old_df = pd.read_csv(AUDIT_CSV)
-            # Acumula e remove duplicatas pela manchete para manter o histórico do dia
             combined = pd.concat([old_df, new_df]).drop_duplicates(subset=['Manchete'], keep='first')
             combined.to_csv(AUDIT_CSV, index=False)
         else:
             new_df.to_csv(AUDIT_CSV, index=False)
 
 def auto_report_handler():
-    """Gatilho para as 00:00h"""
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
-    
-    if now.hour == 0 and now.minute <= 2: # Janela de 2 min para garantir o disparo no refresh
+    if now.hour == 0 and now.minute <= 2:
         last_date = ""
         if os.path.exists(REPORT_MARKER):
             with open(REPORT_MARKER, "r") as f: last_date = f.read().strip()
-        
         if last_date != today_str:
             if upload_to_drive():
                 with open(REPORT_MARKER, "w") as f: f.write(today_str)
-                # Opcional: limpa o arquivo para o novo dia após o backup
-                # if os.path.exists(AUDIT_CSV): os.remove(AUDIT_CSV)
+
+def get_market_metrics():
+    try:
+        wti = yf.Ticker("CL=F").history(period="2d")
+        wti_p, wti_prev = wti['Close'].iloc[-1], wti['Close'].iloc[-2]
+        change_pct = ((wti_p - wti_prev) / wti_prev) * 100
+        return {"WTI": wti_p, "Z": round(change_pct / 1.2, 2), "status": "LIVE_YF", "is_live": True}
+    except: return {"WTI": 0.0, "Z": 0.0, "status": "MKT_OFFLINE", "is_live": False}
 
 # --- 4. INTERFACE ---
 def main():
@@ -158,8 +169,7 @@ def main():
     mkt = get_market_metrics()
     df = pd.read_csv(AUDIT_CSV) if os.path.exists(AUDIT_CSV) else pd.DataFrame()
     
-    status_color = "status-live" if mkt["is_live"] else "status-off"
-    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V92 EVO</div><div class="{status_color}">● {mkt["status"]} | {datetime.now().strftime("%H:%M:%S")}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="live-status"><div><b>XTIUSD TERMINAL</b> | V92 EVO</div><div class="status-live">● {mkt["status"]} | {datetime.now().strftime("%H:%M:%S")}</div></div>', unsafe_allow_html=True)
 
     t1, t2, t3 = st.tabs(["📊 DASHBOARD", "🔍 AUDIT FEED", "🧠 TRAINING"])
 
@@ -180,21 +190,18 @@ def main():
             st.plotly_chart(fig, width='stretch')
         
         with cr:
-            st.markdown("**LIVE NEWS FEED (ACCUMULATED)**")
+            st.markdown("**LIVE NEWS FEED (ACUMULADO)**")
             if not df.empty:
                 n_html = '<div class="scroll-box"><table class="terminal-table">'
-                # Mostra as mais recentes primeiro no feed visual
                 for _, r in df.iloc[::-1].iterrows():
                     n_html += f"<tr><td style='color:#64748B; font-size:10px;'>{r['Data']}</td><td>{r['Manchete']}</td><td><a href='{r['Link']}' class='link-btn' target='_blank'>LINK</a></td></tr>"
                 st.markdown(n_html + "</table></div>", unsafe_allow_html=True)
 
     with t2:
         st.markdown("### 🔍 Professional Sentiment Audit")
-        col_btn1, col_btn2 = st.columns([1, 4])
-        with col_btn1:
-            if st.button("🚀 Manual Backup"):
-                if upload_to_drive(): st.success("Drive OK!")
-                else: st.error("Drive Fail!")
+        if st.button("🚀 Forçar Backup Manual"):
+            if upload_to_drive(): st.success("Backup no Drive realizado!")
+            else: st.error("Falha no Backup!")
         
         if not df.empty:
             audit_html = """<table class="terminal-table"><tr><th>DATA</th><th>FONTE</th><th>MANCHETE</th><th>LEXICON</th><th>AI</th><th>ALPHA</th></tr>"""
