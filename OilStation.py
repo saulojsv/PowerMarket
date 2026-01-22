@@ -12,7 +12,6 @@ from google import genai
 from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE & REGRAS 2026 ---
-# Silencia os avisos de sintaxe do Python 3.13 para uma foto limpa
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -26,15 +25,23 @@ st.markdown("""
     .main { background-color: #000000 !important; }
     [data-testid="stAppViewContainer"] { background-color: #000000; padding: 1rem 3rem; }
     [data-testid="stSidebar"] { display: none; } 
+    
     .news-card-mini { 
         background-color: #0a0a0a; border: 1px solid #1a1a1a; 
         padding: 12px; margin-bottom: 8px; border-radius: 4px;
         display: flex; justify-content: space-between; align-items: center;
     }
-    .label-tag { font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; }
+    .label-tag { font-weight: 800; font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; margin-left: 10px; }
     .BULLISH { color: #00FF41; border: 1px solid #00FF41; border-left: 4px solid #00FF41 !important; }
     .BEARISH { color: #FF3131; border: 1px solid #FF3131; border-left: 4px solid #FF3131 !important; }
     .NEUTRAL { color: #888; border: 1px solid #888; }
+    
+    .news-link {
+        color: #00FF41; text-decoration: none; font-size: 1.2rem; margin-right: 10px;
+        opacity: 0.7; transition: 0.3s;
+    }
+    .news-link:hover { opacity: 1; color: #ffffff; }
+
     .status-box { 
         border: 2px solid #00FF41; padding: 30px; text-align: center; 
         font-weight: 800; font-size: 3rem; background-color: #050505;
@@ -54,7 +61,6 @@ class XTINeuralEngine:
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
         
-        # LISTA DE SITES NO CÓDIGO (HARDCODED PARA SEGURANÇA)
         self.oil_sources = [
             "https://oilprice.com",
             "https://www.reuters.com/business/energy/",
@@ -74,7 +80,6 @@ class XTINeuralEngine:
                 data = json.load(f)
                 self.bullish_keywords = data.get('bullish', {})
                 self.bearish_keywords = data.get('bearish', {})
-                # Opcional: Adiciona sites extras do JSON se existirem
                 if data.get('sites'): self.oil_sources.extend(data.get('sites'))
                 self.oil_sources = list(set(self.oil_sources))
         except: pass
@@ -88,9 +93,8 @@ class XTINeuralEngine:
             score = float(re.findall(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", response.text)[0])
             label = re.findall(r"LABEL:\s*(\w+)", response.text)[0].upper()
             summary = response.text.split("DEEP_READER:")[-1].split("[NEW_TERM:")[0].strip()
-            new_term = response.text.split("NEW_TERM:")[-1].replace("]", "").strip().upper()
-            return score, label, summary, new_term
-        except: return 0.0, "NEUTRAL", "Erro Neural", "NONE"
+            return score, label, summary
+        except: return 0.0, "NEUTRAL", "Erro Neural"
 
 @st.cache_data(ttl=120)
 def auto_scan(sources):
@@ -98,9 +102,10 @@ def auto_scan(sources):
     for url in sources:
         try:
             a = Article(url); a.download(); a.parse()
-            if len(a.title) > 10: collected.append(a.title)
+            if len(a.title) > 10: 
+                collected.append({"title": a.title, "url": url})
         except: continue
-    return list(set(collected))
+    return collected
 
 @st.cache_data(ttl=300)
 def get_market_data():
@@ -114,23 +119,37 @@ def get_market_data():
 
 def main():
     engine = XTINeuralEngine()
-    st.markdown("XTI/USD TERMINAL")
+    st.markdown("XTI/USD NEURAL TERMINAL")
     
-    headlines = auto_scan(engine.oil_sources)
+    headlines_data = auto_scan(engine.oil_sources)
     analysis_results = []
     
-    for h in headlines:
-        score, label, summary, new_term = engine.get_deep_analysis(h)
-        analysis_results.append({"h": h, "s": score, "l": label, "sum": summary})
+    for item in headlines_data:
+        score, label, summary = engine.get_deep_analysis(item['title'])
+        analysis_results.append({
+            "h": item['title'], 
+            "url": item['url'], 
+            "s": score, 
+            "l": label, 
+            "sum": summary
+        })
 
     tab_home, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL INTELLIGENCE"])
 
     with tab_home:
         col_feed, col_market = st.columns([1.8, 1])
         with col_feed:
-            st.write(f"🛰️ **LIVE RESUME FEED ({len(headlines)} Manchetes)**")
+            st.write(f"🛰️ **LIVE RESUME FEED ({len(headlines_data)} Manchetes)**")
             for item in analysis_results:
-                st.markdown(f'<div class="news-card-mini {item["l"]}"><span style="color:white; font-weight:500;">{item["h"][:110]}...</span><span class="label-tag {item["l"]}">{item["l"]}</span></div>', unsafe_allow_html=True)
+                st.markdown(f'''
+                    <div class="news-card-mini {item['l']}">
+                        <div style="display: flex; align-items: center;">
+                            <a href="{item['url']}" target="_blank" class="news-link" title="Ver fonte original">🔗</a>
+                            <span style="color:white; font-weight:500;">{item['h'][:110]}...</span>
+                        </div>
+                        <span class="label-tag {item['l']}">{item['l']}</span>
+                    </div>
+                ''', unsafe_allow_html=True)
 
         with col_market:
             xti_data, spot_price = get_market_data()
@@ -152,8 +171,6 @@ def main():
         st.write("### 🧠 KNOWLEDGE AUDIT")
         st.write(f"Bullish ({len(engine.bullish_keywords)}):")
         st.markdown(" ".join([f'<span class="lexicon-chip">{k}</span>' for k in engine.bullish_keywords.keys()]) if engine.bullish_keywords else "Vazio", unsafe_allow_html=True)
-        st.write(f"Bearish ({len(engine.bearish_keywords)}):")
-        st.markdown(" ".join([f'<span class="lexicon-chip" style="border-color:#FF3131; color:#FF3131;">{k}</span>' for k in engine.bearish_keywords.keys()]) if engine.bearish_keywords else "Vazio", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
