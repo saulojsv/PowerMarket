@@ -15,7 +15,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE ---
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="XTI NEURAL v12.5", layout="wide")
+st.set_page_config(page_title="XTI NEURAL v12.6", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS TERMINAL ---
@@ -29,74 +29,75 @@ st.markdown("""
     }
     .lexicon-box {
         font-size: 0.75rem; padding: 4px 8px; border-radius: 3px;
-        display: inline-block; margin-bottom: 8px; font-weight: bold;
+        display: inline-block; margin-bottom: 8px; font-weight: bold; background:#222; border:1px solid #444;
     }
     .BULLISH { border-left: 5px solid #00FF41 !important; color: #00FF41; }
     .BEARISH { border-left: 5px solid #FF3131 !important; color: #FF3131; }
     .NEUTRAL { border-left: 5px solid #888 !important; color: #888; }
     .status-box { border: 2px solid #00FF41; padding: 20px; text-align: center; font-size: 2.5rem; color: #00FF41; background: #050505; }
-    .analysis-text { color: #e0e0e0; font-size: 0.9rem; line-height: 1.4; background: #111; padding: 10px; border-radius: 4px; }
+    .analysis-text { color: #e0e0e0; font-size: 0.9rem; line-height: 1.4; background: #111; padding: 12px; border-radius: 4px; border-left: 2px solid #333; }
     </style>
     """, unsafe_allow_html=True)
 
-class DeepNeuralEngine:
+class RobustNeuralEngine:
     def __init__(self):
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
         
-        # 22 Lexicons de Mercado de Petróleo
-        self.lexicon_bull = ['cut', 'opec+', 'shortage', 'sanction', 'tension', 'disruption', 'drawdown', 'strike', 'escalation', 'outage', 'unrest']
-        self.lexicon_bear = ['glut', 'surplus', 'increase', 'shale', 'recession', 'slowdown', 'inventory-build', 'oversupply', 'weak-demand', 'easing', 'output-rise']
+        # Lexicons atualizados para Oil Market 2026
+        self.lex_bull = ['cut', 'opec+', 'shortage', 'sanction', 'tension', 'drawdown', 'strike', 'escalation', 'outage', 'unrest', 'war', 'attack']
+        self.lex_bear = ['glut', 'surplus', 'increase', 'shale', 'recession', 'slowdown', 'inventory-build', 'oversupply', 'weak-demand', 'output-rise']
 
     def run_lexicon(self, text):
-        text_lower = text.lower()
-        bull_hits = sum(1 for word in self.lexicon_bull if word in text_lower)
-        bear_hits = sum(1 for word in self.lexicon_bear if word in text_lower)
-        
-        if bull_hits > bear_hits: return "BULLISH", bull_hits
-        if bear_hits > bull_hits: return "BEARISH", bear_hits
+        t = text.lower()
+        b_hits = sum(1 for w in self.lex_bull if w in t)
+        be_hits = sum(1 for w in self.lex_bear if w in t)
+        if b_hits > be_hits: return "BULLISH", b_hits
+        if be_hits > b_hits: return "BEARISH", be_hits
         return "NEUTRAL", 0
 
-    def deep_analyze(self, title, full_text):
-        if not self.client: return 0.0, "NEUTRAL", "SISTEMA OFFLINE"
+    def deep_analyze(self, title, text):
+        if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
+        
+        # Limpeza de texto para evitar quebras no prompt
+        clean_text = re.sub(r'\s+', ' ', text)[:3000]
         
         prompt = f"""
-        ANÁLISE TÉCNICA DE MERCADO (WTI CRUDE OIL):
-        A notícia abaixo foi pré-classificada pelo Lexicon. Sua tarefa é ler o CONTEÚDO INTEGRAL e realizar uma análise interpretativa profissional.
+        OIL MARKET TRADER ANALYSIS:
+        Analyze the text and return the sentiment for WTI Crude Oil.
         
-        TÍTULO: {title}
-        CONTEÚDO: {full_text[:3500]}
+        ARTICLE: {title}
+        CONTENT: {clean_text}
         
-        REGRAS:
-        1. Identifique o impacto real no preço do barril.
-        2. Ignore ruídos políticos irrelevantes ao trade.
-        3. Formate a resposta exatamente assim:
-        SCORE: [valor de -1.0 a 1.0]
+        MANDATORY FORMAT (No other text):
+        SCORE: [X.X]
         LABEL: [BULLISH/BEARISH/NEUTRAL]
-        INSIGHT: [Análise de 1 parágrafo focada em trading]
+        INSIGHT: [Trading summary]
         """
         try:
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            txt = response.text.upper()
-            score = float(re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", txt).group(1))
-            label = re.search(r"LABEL:\s*(\w+)", txt).group(1)
-            insight = re.search(r"INSIGHT:\s*(.*)", response.text, re.DOTALL | re.IGNORECASE).group(1).strip()
+            raw = response.text
+            
+            # Parsing robusto sem depender apenas de regex rígido
+            lines = [line.strip() for line in raw.split('\n') if ':' in line]
+            data = {line.split(':')[0].upper(): line.split(':')[1].strip() for line in lines}
+            
+            score = float(re.findall(r"[-+]?\d*\.\d+|\d+", data.get('SCORE', '0.0'))[0])
+            label = data.get('LABEL', 'NEUTRAL').replace('[','').replace(']','')
+            insight = data.get('INSIGHT', 'Análise processada com sucesso.')
+            
             return score, label, insight
-        except:
-            return 0.0, "NEUTRAL", "Erro no processamento da análise profunda."
+        except Exception as e:
+            return 0.0, "NEUTRAL", f"Falha na interpretação neural: {str(e)[:50]}"
 
 @st.cache_data(ttl=300)
-def fetch_news_content():
-    sources = [
-        "https://oilprice.com", 
-        "https://www.worldoil.com/news/",
-        "https://finance.yahoo.com/news/"
-    ]
+def fetch_and_clean_news():
+    sources = ["https://oilprice.com", "https://www.worldoil.com/news/", "https://finance.yahoo.com/news/"]
     data = []
     config = Config()
     config.browser_user_agent = 'Mozilla/5.0'
-    config.request_timeout = 10 
+    config.request_timeout = 10
     
     for site in sources:
         try:
@@ -104,73 +105,61 @@ def fetch_news_content():
             for article in paper.articles[:5]:
                 article.download()
                 article.parse()
-                # Garante que há texto suficiente para análise (mínimo 200 caracteres)
-                if len(article.text) > 200:
+                # Aumentei o rigor da limpeza: se não tem texto real, ignora
+                if len(article.text) > 300:
                     data.append({"title": article.title, "text": article.text, "url": article.url})
         except: continue
     return data
 
 def main():
-    engine = DeepNeuralEngine()
-    st.markdown("### < XTI/USD NEURAL v12.5 // LEXICON + DEEP ANALYSIS >")
+    engine = RobustNeuralEngine()
+    st.markdown("### < XTI/USD TERMINAL v12.6 // DEEP CONTENT SCAN >")
 
-    with st.status("📡 Escaneando conteúdos e extraindo texto integral...", expanded=False) as status:
-        raw_news = fetch_news_content()
-        status.update(label=f"✅ {len(raw_news)} Notícias lidas com sucesso", state="complete")
+    # Tag superior de varredura (Mantida)
+    with st.status("🔍 Verificando Fontes e Extraindo Conteúdo Integral...", expanded=False) as status:
+        news_list = fetch_and_clean_news()
+        status.update(label=f"✅ Sincronização Completa: {len(news_list)} eventos detectados.", state="complete")
 
-    processed_data = []
-    for item in raw_news:
-        # 1. Conclusão do Lexicon primeiro
-        lex_label, hits = engine.run_lexicon(item['text'])
-        # 2. Análise da IA depois
-        score, ai_label, insight = engine.deep_analyze(item['title'], item['text'])
-        
-        processed_data.append({
-            "title": item['title'],
-            "url": item['url'],
-            "lex_label": lex_label,
-            "lex_hits": hits,
-            "score": score,
-            "ai_label": ai_label,
-            "insight": insight
-        })
+    processed = []
+    for item in news_list:
+        lex_l, lex_h = engine.run_lexicon(item['text'])
+        s, ai_l, ins = engine.deep_analyze(item['title'], item['text'])
+        processed.append({"t": item['title'], "u": item['url'], "ll": lex_l, "lh": lex_h, "s": s, "al": ai_l, "i": ins})
 
     tab_dash, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 IA DEEP ANALYSIS"])
 
     with tab_dash:
-        col_a, col_b = st.columns([1.8, 1])
-        with col_a:
-            st.write(f"🛰️ **FEED CONSOLIDADO**")
-            for p in processed_data:
+        col_1, col_2 = st.columns([1.8, 1])
+        with col_1:
+            st.write("📡 **FEED ATIVO (LEXICON PRIORITÁRIO)**")
+            for p in processed:
                 st.markdown(f'''
-                    <div class="news-card {p['ai_label']}">
-                        <div class="lexicon-box" style="background:#222; border:1px solid #444;">LEXICON: {p['lex_label']} ({p['lex_hits']} gatilhos)</div>
-                        <div style="font-weight:bold; font-size:1rem; margin-bottom:5px;">{p['title']}</div>
-                        <div style="font-size:0.75rem; color:#00FF41;">
-                            IA SCORE: {p['score']} | <a href="{p['url']}" target="_blank" style="color:#888;">FONTE ORIGINAL</a>
-                        </div>
+                    <div class="news-card {p['al']}">
+                        <div class="lexicon-box">LEXICON: {p['ll']} ({p['lh']} gatilhos)</div>
+                        <div style="font-weight:bold; font-size:1rem; margin-bottom:5px;">{p['t']}</div>
+                        <div style="font-size:0.75rem; color:#aaa;">SCORE IA: {p['s']} | <a href="{p['u']}" target="_blank" style="color:#00FF41;">LINK</a></div>
                     </div>
                 ''', unsafe_allow_html=True)
 
-        with col_b:
-            avg = np.mean([x['score'] for x in processed_data]) if processed_data else 0.0
-            dec = "BUY" if avg > 0.15 else "SELL" if avg < -0.15 else "HOLD"
-            v_color = "#00FF41" if dec == "BUY" else "#FF3131" if dec == "SELL" else "#FFFF00"
-            st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{dec}</div>', unsafe_allow_html=True)
+        with col_2:
+            avg_s = np.mean([x['s'] for x in processed]) if processed else 0.0
+            v_text = "BUY" if avg_s > 0.15 else "SELL" if avg_s < -0.15 else "HOLD"
+            v_color = "#00FF41" if v_text == "BUY" else "#FF3131" if v_text == "SELL" else "#FFFF00"
+            st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{v_text}</div>', unsafe_allow_html=True)
             
-            ticker = yf.Ticker("CL=F")
-            price = ticker.fast_info.last_price
-            st.metric("WTI SPOT", f"${price:.2f}")
+            p_data = yf.download("CL=F", period="1d", interval="15m", progress=False)
+            if not p_data.empty:
+                st.metric("WTI SPOT", f"${p_data['Close'].iloc[-1]:.2f}", delta=f"{((p_data['Close'].iloc[-1]/p_data['Close'].iloc[-2])-1)*100:.2f}%")
 
     with tab_neural:
-        st.write("🔍 **INTERPRETAÇÃO NEURAL DO CONTEÚDO LIDO**")
-        for p in processed_data:
-            with st.expander(f"ANÁLISE: {p['title'][:60]}..."):
-                st.markdown(f"**Conclusão Inicial (Lexicon):** `{p['lex_label']}`")
-                st.markdown(f"**Veredito IA:** `{p['ai_label']}` (Score: {p['score']})")
-                st.markdown("**Insight para Operação:**")
-                st.markdown(f'<div class="analysis-text">{p['insight']}</div>', unsafe_allow_html=True)
-                st.write(f"[Acessar conteúdo completo]({p['url']})")
+        st.write("🧠 **PROCESSAMENTO DE CONTEÚDO INTEGRAL**")
+        for p in processed:
+            with st.expander(f"ANALYSIS: {p['t'][:60]}..."):
+                c1, c2 = st.columns(2)
+                c1.metric("Lexicon Status", p['ll'])
+                c2.metric("Neural Score", p['s'])
+                st.markdown("**Insight Interpretativo:**")
+                st.markdown(f'<div class="analysis-text">{p['i']}</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
