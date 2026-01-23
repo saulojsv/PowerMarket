@@ -13,147 +13,125 @@ from newspaper import Config
 from google import genai
 from streamlit_autorefresh import st_autorefresh
 
-# --- REGRAS DE AMBIENTE ---
-warnings.filterwarnings("ignore", category=SyntaxWarning)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-st.set_page_config(page_title="XTI NEURAL", layout="wide")
+# --- AMBIENTE ---
+warnings.filterwarnings("ignore")
+st.set_page_config(page_title="XTI NEURAL v12.4", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
-# --- CSS DE ALTA PERFORMANCE ---
+# --- CSS TERMINAL ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-    .main { background-color: #000000 !important; }
-    [data-testid="stAppViewContainer"] { background-color: #000000; padding: 1rem 2rem; }
-    .news-card-mini { 
-        background-color: #0a0a0a; border: 1px solid #1a1a1a; 
-        padding: 10px; margin-bottom: 6px; border-radius: 4px;
-        display: flex; justify-content: space-between; align-items: center;
+    .main { background-color: #000 !important; font-family: 'JetBrains Mono'; }
+    .news-card { 
+        background: #0a0a0a; border: 1px solid #1a1a1a; padding: 12px; 
+        margin-bottom: 8px; border-radius: 4px; border-left: 4px solid #333;
     }
-    .BULLISH { border-left: 5px solid #00FF41 !important; color: #00FF41; }
-    .BEARISH { border-left: 5px solid #FF3131 !important; color: #FF3131; }
-    .NEUTRAL { border-left: 5px solid #555 !important; color: #888; }
-    .status-box { 
-        border: 2px solid #00FF41; padding: 20px; text-align: center; 
-        font-weight: 800; font-size: 2.5rem; background-color: #050505;
-        font-family: 'JetBrains Mono';
-    }
+    .BULLISH { border-left-color: #00FF41 !important; color: #00FF41; }
+    .BEARISH { border-left-color: #FF3131 !important; color: #FF3131; }
+    .NEUTRAL { border-left-color: #888 !important; color: #888; }
+    .status-box { border: 2px solid #00FF41; padding: 20px; text-align: center; font-size: 2.5rem; color: #00FF41; }
     </style>
     """, unsafe_allow_html=True)
 
-class XTINeuralEngine:
+class InterpretativeNeuralEngine:
     def __init__(self):
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
 
-    def get_deep_analysis(self, title, content):
+    def interpret_market_event(self, title, partial_text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
         
-        # PROMPT OTIMIZADO PARA EVITAR NEUTRALIDADE EXCESSIVA
+        # PROMPT INTERPRETATIVO: Força a IA a inferir o impacto mesmo com poucos dados
         prompt = f"""
-        ACT AS A WTI CRUDE OIL TRADER. Analyze the sentiment of this news for oil prices.
+        URGENT OIL MARKET INTERPRETATION:
+        Analyze the likely impact of this event on WTI Crude Oil prices.
         
-        CRITERIA:
-        - BULLISH: Supply cuts, geopolitical tension in Middle East, high demand, weak dollar.
-        - BEARISH: Increased production, high inventories, economic recession, strong dollar.
+        DATA:
+        Event: {title}
+        Context: {partial_text[:1000] if partial_text else "No extra context available. Use Event Title to infer impact."}
         
-        TITLE: {title}
-        CONTENT: {content[:2000]}
+        TASK:
+        Infer if this is BULLISH (price up), BEARISH (price down), or NEUTRAL.
+        Be decisive. Avoid Neutral unless the news is purely administrative.
         
-        RETURN EXACTLY THIS FORMAT:
-        SCORE: (value from -1.0 to 1.0)
-        LABEL: (BULLISH, BEARISH, or NEUTRAL)
-        SUMMARY: (max 12 words)
+        FORMAT:
+        SCORE: [value -1.0 to 1.0]
+        LABEL: [BULLISH/BEARISH/NEUTRAL]
+        REASON: [Short explanation, max 10 words]
         """
         try:
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            res_text = response.text.upper()
-            
-            score = float(re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", res_text).group(1))
-            label = re.search(r"LABEL:\s*(\w+)", res_text).group(1)
-            summary = re.search(r"SUMMARY:\s*(.*)", res_text).group(1).strip()
-            return score, label, summary
+            txt = response.text.upper()
+            score = float(re.search(r"SCORE:\s*([-+]?\d*\.\d+|\d+)", txt).group(1))
+            label = re.search(r"LABEL:\s*(\w+)", txt).group(1)
+            reason = re.search(r"REASON:\s*(.*)", txt).group(1).strip()
+            return score, label, reason
         except:
-            return 0.0, "NEUTRAL", "Erro no processamento neural."
+            return 0.0, "NEUTRAL", "Erro na Inferência Neural"
 
-# --- SCANNER COM CACHE DE BACKGROUND (Simulado via TTL) ---
-@st.cache_data(ttl=300) # O scan roda uma vez a cada 5 min e serve para todos
-def background_scan():
+@st.cache_data(ttl=300)
+def fast_interpretative_scan():
+    # Fontes que respondem rápido e com bons snippets
     sources = [
-        "https://oilprice.com", "https://www.worldoil.com/news/",
-        "https://www.offshore-energy.biz/oil-and-gas/",
-        "https://finance.yahoo.com/news/", "https://www.energyvoice.com/category/oil-and-gas/"
+        "https://oilprice.com", 
+        "https://www.worldoil.com/news/",
+        "https://finance.yahoo.com/news/"
     ]
-    collected = []
-    keywords = ['oil', 'crude', 'wti', 'opec', 'inventory', 'production']
+    data = []
     config = Config()
     config.browser_user_agent = 'Mozilla/5.0'
-    config.request_timeout = 10
+    config.request_timeout = 5 # Timeout agressivo para não travar
 
     for site in sources:
         try:
             paper = newspaper.build(site, config=config, memoize_articles=False)
-            for article in paper.articles[:5]:
-                if any(kw in article.url.lower() for kw in keywords):
-                    article.download()
-                    article.parse()
-                    if len(article.title) > 15:
-                        collected.append({"title": article.title, "text": article.text, "url": article.url})
+            for article in paper.articles[:6]:
+                article.download()
+                article.parse()
+                if len(article.title) > 20:
+                    data.append({"title": article.title, "text": article.text, "url": article.url})
         except: continue
-    return collected
+    return data
 
 def main():
-    engine = XTINeuralEngine()
-    st.markdown("### < XTI/USD NEURAL TERMINAL v12.3 // BACKGROUND SYNC >")
+    engine = InterpretativeNeuralEngine()
+    st.markdown("### < XTI/USD TERMINAL v12.4 // INTERPRETATIVE ENGINE >")
 
-    # Execução do Scan (Usa cache se disponível)
-    with st.spinner("Sincronizando rede neural..."):
-        news_data = background_scan()
+    # Background Scan (Cacheado)
+    with st.status("🔍 Varredura Interpretativa Ativa...", expanded=False) as status:
+        raw_news = fast_interpretative_scan()
+        status.update(label="✅ Varredura Concluída", state="complete")
 
-    analysis_results = []
-    for item in news_data:
-        # Analisa cada notícia (Também pode ser cacheado para economizar API)
-        s, l, sum_ = engine.get_deep_analysis(item['title'], item['text'])
-        analysis_results.append({"title": item['title'], "url": item['url'], "s": s, "l": l, "sum": sum_})
+    processed_data = []
+    if raw_news:
+        for item in raw_news:
+            # INTERPRETAÇÃO: Se o 'text' vier vazio (falha no parsing), a IA interpreta o 'title'
+            s, l, r = engine.interpret_market_event(item['title'], item['text'])
+            processed_data.append({"t": item['title'], "u": item['url'], "s": s, "l": l, "r": r})
 
-    tab_dash, tab_neural = st.tabs(["📊 DASHBOARD", "🧠 NEURAL DATA"])
+    col_a, col_b = st.columns([1.8, 1])
 
-    with tab_dash:
-        col_a, col_b = st.columns([1.8, 1])
-        with col_a:
-            st.write(f"🛰️ **FEED ATIVO ({len(analysis_results)} notícias)**")
-            for res in analysis_results:
-                st.markdown(f'''
-                    <div class="news-card-mini {res['l']}">
-                        <div style="font-size:0.85rem;">
-                            <a href="{res['url']}" target="_blank" style="text-decoration:none; color:inherit;">🔗 {res['title'][:80]}...</a>
-                        </div>
-                        <div style="font-weight:bold; font-size:0.7rem;">{res['l']} ({res['s']})</div>
-                    </div>
-                ''', unsafe_allow_html=True)
+    with col_a:
+        st.write(f"🛰️ **FEED NEURAL ({len(processed_data)} notícias)**")
+        for p in processed_data:
+            st.markdown(f'''
+                <div class="news-card {p['l']}">
+                    <div style="font-weight:bold; font-size:0.9rem;">{p['t']}</div>
+                    <div style="font-size:0.75rem; color:#aaa; margin-top:5px;">{p['r']}</div>
+                    <div style="font-size:0.7rem; margin-top:3px;">Score: {p['s']} | <a href="{p['u']}" style="color:#00FF41;">Link</a></div>
+                </div>
+            ''', unsafe_allow_html=True)
 
-        with col_b:
-            # Cálculo de Mercado
-            avg_score = np.mean([x['s'] for x in analysis_results]) if analysis_results else 0.0
-            veredito = "BUY" if avg_score > 0.1 else "SELL" if avg_score < -0.1 else "HOLD"
-            v_color = "#00FF41" if veredito == "BUY" else "#FF3131" if veredito == "SELL" else "#FFFF00"
-            
-            st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{veredito}</div>', unsafe_allow_html=True)
-            
-            # Gráfico Rápido
-            df = yf.download("CL=F", period="1d", interval="15m", progress=False)
-            if not df.empty:
-                fig = go.Figure(go.Scatter(x=df.index, y=df['Close'], line=dict(color=v_color)))
-                fig.update_layout(template="plotly_dark", height=200, margin=dict(l=0,r=0,t=0,b=0))
-                st.plotly_chart(fig, width='stretch')
-
-    with tab_neural:
-        for res in analysis_results:
-            with st.expander(f"RAW ANALYSIS: {res['title'][:50]}..."):
-                st.write(f"**Sumário:** {res['sum']}")
-                st.progress((res['s'] + 1) / 2) # Normaliza -1 a 1 para 0 a 1
+    with col_b:
+        avg = np.mean([x['s'] for x in processed_data]) if processed_data else 0.0
+        dec = "BUY" if avg > 0.1 else "SELL" if avg < -0.1 else "HOLD"
+        st.markdown(f'<div class="status-box">{dec}</div>', unsafe_allow_html=True)
+        
+        # Market Price
+        ticker = yf.Ticker("CL=F")
+        price = ticker.fast_info.last_price
+        st.metric("WTI SPOT", f"${price:.2f}")
 
 if __name__ == "__main__":
     main()
