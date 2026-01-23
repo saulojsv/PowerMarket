@@ -17,7 +17,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE ---
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="XTI NEURAL v12.8", layout="wide")
+st.set_page_config(page_title="XTI NEURAL v12.9", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS TERMINAL (Mantido conforme solicitado) ---
@@ -41,13 +41,12 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-class AdvancedNeuralEngine:
+class UltimateNeuralEngine:
     def __init__(self):
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         
-        # 22 Lexicons para Petróleo
-        self.lex_bull = ['cut', 'opec+', 'shortage', 'sanction', 'tension', 'drawdown', 'strike', 'escalation', 'outage', 'unrest', 'war', 'attack']
+        self.lex_bull = ['cut', 'opec+', 'shortage', 'sanction', 'tension', 'drawdown', 'strike', 'escalation', 'outage', 'unrest', 'war', 'attack', 'deal', 'agreement']
         self.lex_bear = ['glut', 'surplus', 'increase', 'shale', 'recession', 'slowdown', 'inventory-build', 'oversupply', 'weak-demand', 'output-rise']
 
     def run_lexicon(self, text):
@@ -59,48 +58,47 @@ class AdvancedNeuralEngine:
         return "NEUTRAL", 0
 
     def deep_analyze(self, title, text):
-        if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
+        if not self.client: return 0.0, "NEUTRAL", "SISTEMA OFFLINE"
         
-        # Configuração de bypass de segurança para notícias financeiras pesadas
-        safety = [
-            types.SafetySetting(category="HATE_SPEECH", threshold="OFF"),
-            types.SafetySetting(category="HARASSMENT", threshold="OFF"),
-            types.SafetySetting(category="DANGEROUS_CONTENT", threshold="OFF"),
-            types.SafetySetting(category="SEXUALLY_EXPLICIT", threshold="OFF"),
-        ]
-
         prompt = f"""
-        Analyze this Oil Market News and return a JSON object.
+        Act as a professional oil trader. Analyze the text and return a JSON object.
         Article: {title}
         Body: {text[:2500]}
         
-        Return ONLY valid JSON:
+        REQUIRED JSON FORMAT:
         {{
-            "score": float between -1.0 and 1.0,
-            "label": "BULLISH", "BEARISH" or "NEUTRAL",
-            "insight": "short trading insight"
+            "score": 0.0,
+            "label": "BULLISH/BEARISH/NEUTRAL",
+            "insight": "trading insight here"
         }}
         """
         try:
             response = self.client.models.generate_content(
                 model="gemini-1.5-flash", 
                 contents=prompt,
-                config=types.GenerateContentConfig(safety_settings=safety, response_mime_type="application/json")
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            # Carrega o JSON da resposta
-            data = json.loads(response.text)
-            return float(data.get('score', 0.0)), data.get('label', 'NEUTRAL'), data.get('insight', 'OK')
-        except:
-            # Fallback se o JSON falhar
-            return 0.0, "NEUTRAL", "Erro de Parsing JSON Neural"
+            
+            # --- FIX: EXTRAÇÃO ROBUSTA DE JSON ---
+            raw_text = response.text.strip()
+            # Remove possíveis blocos de código markdown ```json ... ```
+            clean_json = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if clean_json:
+                data = json.loads(clean_json.group())
+            else:
+                data = json.loads(raw_text)
+
+            return float(data.get('score', 0.0)), data.get('label', 'NEUTRAL'), data.get('insight', 'Análise concluída.')
+        except Exception as e:
+            return 0.0, "NEUTRAL", f"Erro no Parsing: {str(e)[:30]}"
 
 @st.cache_data(ttl=300)
-def fetch_verified_news():
+def fetch_news():
     sources = ["https://oilprice.com", "https://www.worldoil.com/news/", "https://finance.yahoo.com/news/"]
     data = []
     config = Config()
     config.browser_user_agent = 'Mozilla/5.0'
-    config.request_timeout = 10
+    config.request_timeout = 12
     
     for site in sources:
         try:
@@ -114,13 +112,13 @@ def fetch_verified_news():
     return data
 
 def main():
-    engine = AdvancedNeuralEngine()
-    st.markdown("### < XTI/USD TERMINAL v12.8 // NEURAL FIX >")
+    engine = UltimateNeuralEngine()
+    st.markdown("### < XTI/USD TERMINAL v12.9 // ROBUST JSON PARSING >")
 
-    # Tag superior de varredura
+    # Tag de varredura preservada conforme solicitado
     with st.status("🔍 Sincronizando Redes Neurais...", expanded=False) as status:
-        news_list = fetch_verified_news()
-        status.update(label=f"✅ {len(news_list)} Notícias lidas e prontas para análise.", state="complete")
+        news_list = fetch_news()
+        status.update(label=f"✅ {len(news_list)} Notícias processadas com sucesso.", state="complete")
 
     processed = []
     for item in news_list:
@@ -133,7 +131,7 @@ def main():
     with tab_dash:
         col_1, col_2 = st.columns([1.8, 1])
         with col_1:
-            st.write("📡 **FEED ATIVO (LEXICON + IA)**")
+            st.write("📡 **FEED ATIVO (CONTEÚDO INTEGRAL)**")
             for p in processed:
                 st.markdown(f'''
                     <div class="news-card {p['al']}">
@@ -153,18 +151,17 @@ def main():
                 p_data = yf.download("CL=F", period="2d", interval="15m", progress=False)
                 if not p_data.empty:
                     if isinstance(p_data.columns, pd.MultiIndex): p_data.columns = p_data.columns.get_level_values(0)
-                    last = float(p_data['Close'].iloc[-1])
-                    prev = float(p_data['Close'].iloc[-2])
+                    last, prev = float(p_data['Close'].iloc[-1]), float(p_data['Close'].iloc[-2])
                     delta = ((last / prev) - 1) * 100
                     st.metric("WTI SPOT", f"${last:.2f}", delta=f"{delta:.2f}%")
-            except: st.error("Erro de conexão com mercado.")
+            except: st.error("Erro no Spot.")
 
     with tab_neural:
         st.write("🧠 **PROCESSAMENTO DE CONTEÚDO INTEGRAL**")
         for p in processed:
             with st.expander(f"ANALYSIS: {p['t'][:60]}..."):
-                st.markdown(f"**Conclusão Lexicon:** `{p['ll']}`")
-                st.markdown(f"**Insight Neural:**")
+                st.markdown(f"**Veredito IA:** `{p['al']}` (Score: {p['s']})")
+                st.markdown(f"**Insight:**")
                 st.markdown(f'<div class="analysis-text">{p["i"]}</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
