@@ -15,7 +15,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE ---
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="XTI NEURAL v12.6", layout="wide")
+st.set_page_config(page_title="XTI NEURAL v12.7", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
 # --- CSS TERMINAL ---
@@ -45,7 +45,6 @@ class RobustNeuralEngine:
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_id = "gemini-1.5-flash"
         
-        # Lexicons atualizados para Oil Market 2026
         self.lex_bull = ['cut', 'opec+', 'shortage', 'sanction', 'tension', 'drawdown', 'strike', 'escalation', 'outage', 'unrest', 'war', 'attack']
         self.lex_bear = ['glut', 'surplus', 'increase', 'shale', 'recession', 'slowdown', 'inventory-build', 'oversupply', 'weak-demand', 'output-rise']
 
@@ -59,17 +58,13 @@ class RobustNeuralEngine:
 
     def deep_analyze(self, title, text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
-        
-        # Limpeza de texto para evitar quebras no prompt
         clean_text = re.sub(r'\s+', ' ', text)[:3000]
         
         prompt = f"""
         OIL MARKET TRADER ANALYSIS:
         Analyze the text and return the sentiment for WTI Crude Oil.
-        
         ARTICLE: {title}
         CONTENT: {clean_text}
-        
         MANDATORY FORMAT (No other text):
         SCORE: [X.X]
         LABEL: [BULLISH/BEARISH/NEUTRAL]
@@ -77,19 +72,16 @@ class RobustNeuralEngine:
         """
         try:
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            raw = response.text
-            
-            # Parsing robusto sem depender apenas de regex rígido
-            lines = [line.strip() for line in raw.split('\n') if ':' in line]
+            lines = [line.strip() for line in response.text.split('\n') if ':' in line]
             data = {line.split(':')[0].upper(): line.split(':')[1].strip() for line in lines}
             
-            score = float(re.findall(r"[-+]?\d*\.\d+|\d+", data.get('SCORE', '0.0'))[0])
+            score_str = data.get('SCORE', '0.0')
+            score = float(re.findall(r"[-+]?\d*\.\d+|\d+", score_str)[0])
             label = data.get('LABEL', 'NEUTRAL').replace('[','').replace(']','')
-            insight = data.get('INSIGHT', 'Análise processada com sucesso.')
-            
+            insight = data.get('INSIGHT', 'Análise processada.')
             return score, label, insight
-        except Exception as e:
-            return 0.0, "NEUTRAL", f"Falha na interpretação neural: {str(e)[:50]}"
+        except:
+            return 0.0, "NEUTRAL", "Falha na interpretação neural."
 
 @st.cache_data(ttl=300)
 def fetch_and_clean_news():
@@ -98,14 +90,12 @@ def fetch_and_clean_news():
     config = Config()
     config.browser_user_agent = 'Mozilla/5.0'
     config.request_timeout = 10
-    
     for site in sources:
         try:
             paper = newspaper.build(site, config=config, memoize_articles=False)
             for article in paper.articles[:5]:
                 article.download()
                 article.parse()
-                # Aumentei o rigor da limpeza: se não tem texto real, ignora
                 if len(article.text) > 300:
                     data.append({"title": article.title, "text": article.text, "url": article.url})
         except: continue
@@ -113,9 +103,8 @@ def fetch_and_clean_news():
 
 def main():
     engine = RobustNeuralEngine()
-    st.markdown("### < XTI/USD TERMINAL v12.6 // DEEP CONTENT SCAN >")
+    st.markdown("### < XTI/USD TERMINAL v12.7 // METRIC STABILITY >")
 
-    # Tag superior de varredura (Mantida)
     with st.status("🔍 Verificando Fontes e Extraindo Conteúdo Integral...", expanded=False) as status:
         news_list = fetch_and_clean_news()
         status.update(label=f"✅ Sincronização Completa: {len(news_list)} eventos detectados.", state="complete")
@@ -147,19 +136,26 @@ def main():
             v_color = "#00FF41" if v_text == "BUY" else "#FF3131" if v_text == "SELL" else "#FFFF00"
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{v_text}</div>', unsafe_allow_html=True)
             
-            p_data = yf.download("CL=F", period="1d", interval="15m", progress=False)
-            if not p_data.empty:
-                st.metric("WTI SPOT", f"${p_data['Close'].iloc[-1]:.2f}", delta=f"{((p_data['Close'].iloc[-1]/p_data['Close'].iloc[-2])-1)*100:.2f}%")
+            # --- FIX: TRATAMENTO ROBUSTO DE DADOS DE MERCADO ---
+            try:
+                p_data = yf.download("CL=F", period="2d", interval="15m", progress=False)
+                if not p_data.empty:
+                    # Achata colunas se houver multi-index
+                    if isinstance(p_data.columns, pd.MultiIndex):
+                        p_data.columns = p_data.columns.get_level_values(0)
+                    
+                    last_price = float(p_data['Close'].iloc[-1])
+                    prev_price = float(p_data['Close'].iloc[-2])
+                    delta_val = ((last_price / prev_price) - 1) * 100
+                    st.metric("WTI SPOT", f"${last_price:.2f}", delta=f"{delta_val:.2f}%")
+            except Exception as e:
+                st.error("Erro ao carregar dados de mercado.")
 
     with tab_neural:
         st.write("🧠 **PROCESSAMENTO DE CONTEÚDO INTEGRAL**")
         for p in processed:
             with st.expander(f"ANALYSIS: {p['t'][:60]}..."):
-                c1, c2 = st.columns(2)
-                c1.metric("Lexicon Status", p['ll'])
-                c2.metric("Neural Score", p['s'])
-                st.markdown("**Insight Interpretativo:**")
-                st.markdown(f'<div class="analysis-text">{p['i']}</div>', unsafe_allow_html=True)
+                st.write(f"**Insight:** {p['i']}")
 
 if __name__ == "__main__":
     main()
