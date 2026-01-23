@@ -6,19 +6,21 @@ import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
 import re
+import json
 import requests
 from bs4 import BeautifulSoup
 import newspaper
 from newspaper import Config
 from google import genai
+from google.genai import types
 from streamlit_autorefresh import st_autorefresh
 
 # --- AMBIENTE ---
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="XTI NEURAL v12.7", layout="wide")
+st.set_page_config(page_title="XTI NEURAL v12.8", layout="wide")
 st_autorefresh(interval=60000, key="auto_refresh")
 
-# --- CSS TERMINAL ---
+# --- CSS TERMINAL (Mantido conforme solicitado) ---
 st.markdown("""
     <style>
     .main { background-color: #000 !important; font-family: 'JetBrains Mono'; }
@@ -39,12 +41,12 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-class RobustNeuralEngine:
+class AdvancedNeuralEngine:
     def __init__(self):
         self.api_key = st.secrets.get("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
-        self.model_id = "gemini-1.5-flash"
         
+        # 22 Lexicons para Petróleo
         self.lex_bull = ['cut', 'opec+', 'shortage', 'sanction', 'tension', 'drawdown', 'strike', 'escalation', 'outage', 'unrest', 'war', 'attack']
         self.lex_bear = ['glut', 'surplus', 'increase', 'shale', 'recession', 'slowdown', 'inventory-build', 'oversupply', 'weak-demand', 'output-rise']
 
@@ -58,38 +60,48 @@ class RobustNeuralEngine:
 
     def deep_analyze(self, title, text):
         if not self.client: return 0.0, "NEUTRAL", "IA OFFLINE"
-        clean_text = re.sub(r'\s+', ' ', text)[:3000]
         
+        # Configuração de bypass de segurança para notícias financeiras pesadas
+        safety = [
+            types.SafetySetting(category="HATE_SPEECH", threshold="OFF"),
+            types.SafetySetting(category="HARASSMENT", threshold="OFF"),
+            types.SafetySetting(category="DANGEROUS_CONTENT", threshold="OFF"),
+            types.SafetySetting(category="SEXUALLY_EXPLICIT", threshold="OFF"),
+        ]
+
         prompt = f"""
-        OIL MARKET TRADER ANALYSIS:
-        Analyze the text and return the sentiment for WTI Crude Oil.
-        ARTICLE: {title}
-        CONTENT: {clean_text}
-        MANDATORY FORMAT (No other text):
-        SCORE: [X.X]
-        LABEL: [BULLISH/BEARISH/NEUTRAL]
-        INSIGHT: [Trading summary]
+        Analyze this Oil Market News and return a JSON object.
+        Article: {title}
+        Body: {text[:2500]}
+        
+        Return ONLY valid JSON:
+        {{
+            "score": float between -1.0 and 1.0,
+            "label": "BULLISH", "BEARISH" or "NEUTRAL",
+            "insight": "short trading insight"
+        }}
         """
         try:
-            response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            lines = [line.strip() for line in response.text.split('\n') if ':' in line]
-            data = {line.split(':')[0].upper(): line.split(':')[1].strip() for line in lines}
-            
-            score_str = data.get('SCORE', '0.0')
-            score = float(re.findall(r"[-+]?\d*\.\d+|\d+", score_str)[0])
-            label = data.get('LABEL', 'NEUTRAL').replace('[','').replace(']','')
-            insight = data.get('INSIGHT', 'Análise processada.')
-            return score, label, insight
+            response = self.client.models.generate_content(
+                model="gemini-1.5-flash", 
+                contents=prompt,
+                config=types.GenerateContentConfig(safety_settings=safety, response_mime_type="application/json")
+            )
+            # Carrega o JSON da resposta
+            data = json.loads(response.text)
+            return float(data.get('score', 0.0)), data.get('label', 'NEUTRAL'), data.get('insight', 'OK')
         except:
-            return 0.0, "NEUTRAL", "Falha na interpretação neural."
+            # Fallback se o JSON falhar
+            return 0.0, "NEUTRAL", "Erro de Parsing JSON Neural"
 
 @st.cache_data(ttl=300)
-def fetch_and_clean_news():
+def fetch_verified_news():
     sources = ["https://oilprice.com", "https://www.worldoil.com/news/", "https://finance.yahoo.com/news/"]
     data = []
     config = Config()
     config.browser_user_agent = 'Mozilla/5.0'
     config.request_timeout = 10
+    
     for site in sources:
         try:
             paper = newspaper.build(site, config=config, memoize_articles=False)
@@ -102,12 +114,13 @@ def fetch_and_clean_news():
     return data
 
 def main():
-    engine = RobustNeuralEngine()
-    st.markdown("### < XTI/USD TERMINAL v12.7 // METRIC STABILITY >")
+    engine = AdvancedNeuralEngine()
+    st.markdown("### < XTI/USD TERMINAL v12.8 // NEURAL FIX >")
 
-    with st.status("🔍 Verificando Fontes e Extraindo Conteúdo Integral...", expanded=False) as status:
-        news_list = fetch_and_clean_news()
-        status.update(label=f"✅ Sincronização Completa: {len(news_list)} eventos detectados.", state="complete")
+    # Tag superior de varredura
+    with st.status("🔍 Sincronizando Redes Neurais...", expanded=False) as status:
+        news_list = fetch_verified_news()
+        status.update(label=f"✅ {len(news_list)} Notícias lidas e prontas para análise.", state="complete")
 
     processed = []
     for item in news_list:
@@ -120,42 +133,39 @@ def main():
     with tab_dash:
         col_1, col_2 = st.columns([1.8, 1])
         with col_1:
-            st.write("📡 **FEED ATIVO (LEXICON PRIORITÁRIO)**")
+            st.write("📡 **FEED ATIVO (LEXICON + IA)**")
             for p in processed:
                 st.markdown(f'''
                     <div class="news-card {p['al']}">
                         <div class="lexicon-box">LEXICON: {p['ll']} ({p['lh']} gatilhos)</div>
                         <div style="font-weight:bold; font-size:1rem; margin-bottom:5px;">{p['t']}</div>
-                        <div style="font-size:0.75rem; color:#aaa;">SCORE IA: {p['s']} | <a href="{p['u']}" target="_blank" style="color:#00FF41;">LINK</a></div>
+                        <div style="font-size:0.75rem; color:#aaa;">IA VERDICT: {p['al']} | SCORE: {p['s']}</div>
                     </div>
                 ''', unsafe_allow_html=True)
 
         with col_2:
             avg_s = np.mean([x['s'] for x in processed]) if processed else 0.0
-            v_text = "BUY" if avg_s > 0.15 else "SELL" if avg_s < -0.15 else "HOLD"
+            v_text = "BUY" if avg_s > 0.1 else "SELL" if avg_s < -0.1 else "HOLD"
             v_color = "#00FF41" if v_text == "BUY" else "#FF3131" if v_text == "SELL" else "#FFFF00"
             st.markdown(f'<div class="status-box" style="border-color:{v_color}; color:{v_color};">{v_text}</div>', unsafe_allow_html=True)
             
-            # --- FIX: TRATAMENTO ROBUSTO DE DADOS DE MERCADO ---
             try:
                 p_data = yf.download("CL=F", period="2d", interval="15m", progress=False)
                 if not p_data.empty:
-                    # Achata colunas se houver multi-index
-                    if isinstance(p_data.columns, pd.MultiIndex):
-                        p_data.columns = p_data.columns.get_level_values(0)
-                    
-                    last_price = float(p_data['Close'].iloc[-1])
-                    prev_price = float(p_data['Close'].iloc[-2])
-                    delta_val = ((last_price / prev_price) - 1) * 100
-                    st.metric("WTI SPOT", f"${last_price:.2f}", delta=f"{delta_val:.2f}%")
-            except Exception as e:
-                st.error("Erro ao carregar dados de mercado.")
+                    if isinstance(p_data.columns, pd.MultiIndex): p_data.columns = p_data.columns.get_level_values(0)
+                    last = float(p_data['Close'].iloc[-1])
+                    prev = float(p_data['Close'].iloc[-2])
+                    delta = ((last / prev) - 1) * 100
+                    st.metric("WTI SPOT", f"${last:.2f}", delta=f"{delta:.2f}%")
+            except: st.error("Erro de conexão com mercado.")
 
     with tab_neural:
         st.write("🧠 **PROCESSAMENTO DE CONTEÚDO INTEGRAL**")
         for p in processed:
             with st.expander(f"ANALYSIS: {p['t'][:60]}..."):
-                st.write(f"**Insight:** {p['i']}")
+                st.markdown(f"**Conclusão Lexicon:** `{p['ll']}`")
+                st.markdown(f"**Insight Neural:**")
+                st.markdown(f'<div class="analysis-text">{p["i"]}</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
